@@ -32,7 +32,7 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO answer_option (pergunta_id, valor, rotulo, emoji)
-SELECT id, valor, rotulo, emoji
+SELECT v.pergunta_id, v.valor, v.rotulo, v.emoji
 FROM (
   VALUES
     (1, 1, 'Muito ruim', '😡'),

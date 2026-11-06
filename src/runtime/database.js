@@ -26,7 +26,9 @@ export const pool = databaseConfigured
             user: env.dbUser,
             password: env.dbPassword,
           }),
-      ssl: env.dbSsl,
+      ssl: env.dbSsl
+        ? { rejectUnauthorized: env.dbSslRejectUnauthorized }
+        : false,
       connectionTimeoutMillis: 10000,
     })
   : null;
