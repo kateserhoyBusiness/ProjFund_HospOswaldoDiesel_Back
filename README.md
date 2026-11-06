@@ -29,7 +29,11 @@ The backend uses PostgreSQL through `pg`. Configure either `DATABASE_URL` or all
 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`; do not set both
 connection formats. For Supabase on Render, use the Supabase Session Pooler
 connection details. TLS is enabled by default; set `DB_SSL=false` only for a
-trusted local PostgreSQL instance.
+trusted local PostgreSQL instance. TLS certificate verification is enabled by
+default; `DB_SSL_REJECT_UNAUTHORIZED=false` disables certificate verification
+while keeping the connection encrypted. Use this only when necessary for a
+trusted Supabase endpoint; prefer configuring the provider's CA certificate
+where available, especially in production.
 
 Also configure `JWT_SECRET` with a random value of at least 32 characters and
 `CORS_ORIGIN` with the exact frontend origin (or comma-separated origins, without
