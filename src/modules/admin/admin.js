@@ -22,7 +22,7 @@ const optionsSchema = z.array(z.object({
 const questionSchema = z.object({
   setor_id: z.number().int().positive(),
   texto: z.string().trim().min(5).max(500),
-  tipo: z.enum(['rostinho', 'texto', 'multipla']),
+  tipo: z.enum(['rostinho', 'nps', 'texto', 'multipla']),
   ordem: z.number().int().positive().optional().default(1),
   rota_id: z.number().int().positive().optional().nullable(),
   opcoes: optionsSchema.optional().default([]),
@@ -41,7 +41,7 @@ const teamSchema = z.object({
 
 const questionUpdateSchema = z.object({
   texto: z.string().trim().min(5).max(500).optional(),
-  tipo: z.enum(['rostinho', 'texto', 'multipla']).optional(),
+  tipo: z.enum(['rostinho', 'nps', 'texto', 'multipla']).optional(),
   ordem: z.number().int().positive().optional(),
   ativo: z.boolean().optional(),
   opcoes: optionsSchema.optional(),
@@ -49,7 +49,7 @@ const questionUpdateSchema = z.object({
 
 const requireQuestionManager = (req, _res, next) => {
   const permissions = new Set(req.user?.permissoes ?? []);
-  if (permissions.has('super_admin') || permissions.has('admin_setor')) return next();
+  if (permissions.has('super_admin') || permissions.has('admin_setor') || permissions.has('gestao')) return next();
   return next(new AppError('Permissão insuficiente', 403, 'FORBIDDEN'));
 };
 

@@ -11,6 +11,9 @@ async function start() {
   if (env.nodeEnv === 'production' && (env.jwtSecret === 'change-me' || env.jwtSecret.length < 32)) {
     throw new Error('Configure JWT_SECRET com pelo menos 32 caracteres aleatórios para produção.');
   }
+  if (env.nodeEnv === 'production' && env.corsOrigin === '*') {
+    throw new Error('Configure CORS_ORIGIN com as origens autorizadas do front-end em produção.');
+  }
 
   if (pool) {
     await pool.query('SELECT 1');

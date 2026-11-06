@@ -399,7 +399,9 @@ router.put('/pesquisas/:id/respostas/:perguntaId', requireSurveyToken(), asyncHa
     appStore.respostas.push(resposta);
   }
 
-  const respostasDoSetor = appStore.respostas.filter((item) => item.pesquisa_id === pesquisa.id && item.valor !== null && item.valor >= 1 && item.valor <= 5);
+  const respostasDoSetor = appStore.respostas.filter((item) => item.pesquisa_id === pesquisa.id
+    && item.valor !== null && item.valor >= 1 && item.valor <= 5
+    && !appStore.perguntas.find((question) => question.id === item.pergunta_id)?.geral);
   pesquisa.media_parcial = calculateAverage(respostasDoSetor.map((item) => item.valor)) ?? null;
 
   if (pergunta.geral && pergunta.tipo === 'nps') {
@@ -516,6 +518,15 @@ router.post('/pesquisas/:id/manifestacoes', requireSurveyToken(true), asyncHandl
     descricao: z.string().min(5),
     anonimo: z.boolean().optional().default(false),
     canal_contato: z.string().optional(),
+    consentimento: z.boolean().optional().default(false),
+  }).superRefine((feedback, context) => {
+    if (!feedback.anonimo && (!feedback.consentimento || !feedback.canal_contato?.trim())) {
+      context.addIssue({
+        code: 'custom',
+        path: ['consentimento'],
+        message: 'Informe um contato e autorize seu uso para solicitar retorno.',
+      });
+    }
   });
 
   const payload = schema.safeParse(req.body);

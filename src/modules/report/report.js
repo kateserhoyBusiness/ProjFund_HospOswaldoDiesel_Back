@@ -53,7 +53,7 @@ router.get('/reports/excel', requireAuth, requireExportAccess, asyncHandler(asyn
   if (!parsed.success) {
     return res.status(400).json({ erro: 'Filtros inválidos', codigo: 'VALIDATION_ERROR', detalhes: parsed.error.flatten() });
   }
-  const scoped = !req.user.permissoes?.some((permission) => ['super_admin', 'gestao', 'ouvidoria', 'visualizador'].includes(permission));
+  const scoped = !req.user.permissoes?.some((permission) => ['super_admin', 'ouvidoria', 'visualizador'].includes(permission));
   if (scoped && parsed.data.setor_id && Number(parsed.data.setor_id) !== Number(req.user.setor_id)) {
     throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
   }

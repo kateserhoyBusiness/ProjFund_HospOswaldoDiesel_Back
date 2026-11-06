@@ -24,7 +24,7 @@ const requireDashboardAccess = (req, _res, next) => {
 const getFilters = (req) => {
   const parsed = filterSchema.safeParse(req.query);
   if (!parsed.success) throw new AppError('Filtros inválidos', 400, 'VALIDATION_ERROR');
-  const scoped = !req.user.permissoes?.some((permission) => ['super_admin', 'gestao', 'ouvidoria', 'visualizador'].includes(permission));
+  const scoped = !req.user.permissoes?.some((permission) => ['super_admin', 'ouvidoria', 'visualizador'].includes(permission));
   if (scoped && parsed.data.setor_id && Number(parsed.data.setor_id) !== Number(req.user.setor_id)) {
     throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
   }
@@ -57,7 +57,8 @@ router.get('/dashboard/resumo', requireAuth, requireDashboardAccess, asyncHandle
               COUNT(*) FILTER (WHERE status = 'parcial')::integer AS parciais,
               COUNT(*) FILTER (WHERE status = 'concluida')::integer AS concluidas,
               AVG(media_parcial) AS media,
-              ARRAY_AGG(nps_nota) FILTER (WHERE nps_nota IS NOT NULL) AS notas
+              ARRAY_AGG(nps_nota) FILTER (WHERE nps_nota IS NOT NULL) AS notas,
+              (SELECT COUNT(*)::integer FROM feedback WHERE status IN ('aberta', 'em_tratamento')) AS manifestacoes_abertas
        FROM survey p WHERE ${filterSql}`,
       filterValues(filters),
     );
@@ -69,6 +70,7 @@ router.get('/dashboard/resumo', requireAuth, requireDashboardAccess, asyncHandle
       percentual_parciais: row.total ? (row.parciais / row.total) * 100 : 0,
       pesquisas_concluidas: row.concluidas,
       filtros: filters,
+      manifestacoes_abertas: row.manifestacoes_abertas,
     });
   }
 
@@ -82,7 +84,51 @@ router.get('/dashboard/resumo', requireAuth, requireDashboardAccess, asyncHandle
     pesquisas_concluidas: surveys.filter((item) => item.status === 'concluida').length,
     percentual_parciais: surveys.length ? (totalParciais / surveys.length) * 100 : 0,
     filtros: filters,
+    manifestacoes_abertas: appStore.manifestacoes.filter((item) => ['aberta', 'em_tratamento'].includes(item.status)).length,
   });
+}));
+
+router.get('/dashboard/pesquisas', requireAuth, requireDashboardAccess, asyncHandler(async (req, res) => {
+  const permissions = new Set(req.user.permissoes ?? []);
+  if (!['super_admin', 'admin_setor', 'gestao', 'visualizador'].some((permission) => permissions.has(permission))) {
+    throw new AppError('Permissão insuficiente', 403, 'FORBIDDEN');
+  }
+  const filters = getFilters(req);
+  if (databaseConfigured) {
+    const result = await query(
+      `SELECT p.id, s.slug AS setor_slug, p.data_hora, p.turno,
+              CASE WHEN e.id IS NOT NULL AND COUNT(p.id) OVER (PARTITION BY e.id) >= 5
+                   THEN e.nome ELSE NULL END AS equipe,
+              p.media_parcial, p.nps_nota, p.status
+       FROM survey p
+       JOIN sector s ON s.id = p.setor_id
+       LEFT JOIN care_team e ON e.id = p.equipe_id
+       WHERE ${filterSql}
+       ORDER BY p.data_hora DESC, p.id DESC`,
+      filterValues(filters),
+    );
+    return res.json(result.rows);
+  }
+
+  const surveys = applyMemoryFilters(appStore.pesquisas, filters);
+  const teamCounts = new Map();
+  for (const survey of surveys) {
+    if (survey.equipe_id === null) continue;
+    teamCounts.set(survey.equipe_id, (teamCounts.get(survey.equipe_id) ?? 0) + 1);
+  }
+  return res.json(surveys.map((survey) => {
+    const team = appStore.equipes.find((item) => item.id === survey.equipe_id)
+    return {
+      id: survey.id,
+      setor_slug: appStore.setores.find((item) => item.id === survey.setor_id)?.slug,
+      data_hora: survey.data_hora,
+      turno: survey.turno,
+      equipe: team && (teamCounts.get(team.id) ?? 0) >= 5 ? team.nome : null,
+      media_parcial: survey.media_parcial,
+      nps_nota: survey.nps_nota,
+      status: survey.status,
+    }
+  }));
 }));
 
 router.get('/dashboard/setores', requireAuth, requireDashboardAccess, asyncHandler(async (req, res) => {
@@ -123,7 +169,7 @@ router.get('/dashboard/setores', requireAuth, requireDashboardAccess, asyncHandl
 router.get('/dashboard/setores/:id/turnos', requireAuth, requireDashboardAccess, asyncHandler(async (req, res) => {
   const setorId = Number(req.params.id);
   const filters = getFilters(req);
-  const unrestricted = req.user.permissoes?.some((permission) => ['super_admin', 'gestao', 'ouvidoria', 'visualizador'].includes(permission));
+  const unrestricted = req.user.permissoes?.some((permission) => ['super_admin', 'ouvidoria', 'visualizador'].includes(permission));
   if (!unrestricted && Number(req.user.setor_id) !== setorId) {
     throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
   }

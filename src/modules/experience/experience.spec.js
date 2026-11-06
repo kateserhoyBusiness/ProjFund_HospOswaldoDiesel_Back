@@ -3,6 +3,23 @@ import { describe, expect, it } from 'vitest';
 import app from '../../app.js';
 
 describe('public survey endpoints', () => {
+  it('does not count the overall NPS as a sector satisfaction score in memory mode', async () => {
+    const create = await request(app).post('/api/pesquisas').send({ setor_id: 1 });
+    expect(create.status).toBe(201);
+
+    const nps = await request(app)
+      .put(`/api/pesquisas/${create.body.pesquisa_id}/respostas/7`)
+      .set('x-survey-token', create.body.token)
+      .send({ valor: 5, pergunta_id: 7 });
+    expect(nps.body.mediaParcial).toBeNull();
+
+    const rating = await request(app)
+      .put(`/api/pesquisas/${create.body.pesquisa_id}/respostas/1`)
+      .set('x-survey-token', create.body.token)
+      .send({ valor: 4, pergunta_id: 1 });
+    expect(rating.body.mediaParcial).toBe(4);
+  });
+
   it('lists active sectors', async () => {
     const response = await request(app).get('/api/setores');
     expect(response.status).toBe(200);

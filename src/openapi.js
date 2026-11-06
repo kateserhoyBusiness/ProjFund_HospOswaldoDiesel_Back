@@ -13,6 +13,11 @@ export const openApiDocument = {
         scheme: 'bearer',
         bearerFormat: 'JWT',
       },
+      surveyTokenAuth: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-survey-token',
+      },
     },
     schemas: {
       Setor: {
@@ -89,6 +94,7 @@ export const openApiDocument = {
     '/auth/login': {
       post: {
         summary: 'Login do usuário',
+        security: [],
         requestBody: {
           required: true,
           content: {
@@ -117,6 +123,7 @@ export const openApiDocument = {
     '/setores': {
       get: {
         summary: 'Lista setores ativos',
+        security: [],
         responses: {
           '200': { description: 'Lista de setores', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Setor' } } } } },
         },
@@ -125,6 +132,7 @@ export const openApiDocument = {
     '/setores/{slug}': {
       get: {
         summary: 'Detalha um setor',
+        security: [],
         parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '200': { description: 'Setor encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/Setor' } } } },
@@ -135,6 +143,7 @@ export const openApiDocument = {
     '/setores/{slug}/fluxo': {
       get: {
         summary: 'Retorna o fluxo da pesquisa por setor',
+        security: [],
         parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           '200': { description: 'Fluxo retornado com sucesso' },
@@ -145,6 +154,7 @@ export const openApiDocument = {
     '/setores/{slug}/perguntas/{n}': {
       get: {
         summary: 'Busca uma pergunta específica do fluxo',
+        security: [],
         parameters: [
           { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'n', in: 'path', required: true, schema: { type: 'integer' } },
@@ -158,6 +168,7 @@ export const openApiDocument = {
     '/pesquisas': {
       post: {
         summary: 'Cria uma pesquisa para um setor',
+        security: [],
         requestBody: {
           required: true,
           content: {
@@ -183,6 +194,7 @@ export const openApiDocument = {
     '/pesquisas/{id}/respostas/{perguntaId}': {
       put: {
         summary: 'Salva ou atualiza a resposta de uma pergunta',
+        security: [{ surveyTokenAuth: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'integer' } },
           { name: 'perguntaId', in: 'path', required: true, schema: { type: 'integer' } },
@@ -201,6 +213,7 @@ export const openApiDocument = {
     '/pesquisas/{id}/finalizar': {
       post: {
         summary: 'Finaliza a pesquisa e decide destino',
+        security: [{ surveyTokenAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
         responses: {
           '200': { description: 'Pesquisa finalizada', content: { 'application/json': { schema: { type: 'object', properties: { destino: { type: 'string' }, motivo: { type: 'string' } } } } } },
@@ -222,6 +235,7 @@ export const openApiDocument = {
     '/pesquisas/{id}/manifestacoes': {
       post: {
         summary: 'Cria uma manifestação a partir da pesquisa',
+        security: [{ surveyTokenAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
         responses: {
           '201': { description: 'Manifestação criada', content: { 'application/json': { schema: { $ref: '#/components/schemas/Manifestacao' } } } },
@@ -265,6 +279,16 @@ export const openApiDocument = {
           '200': { description: 'Resumo do dashboard' },
         },
       },
+      '/dashboard/pesquisas': {
+        get: {
+          summary: 'Lista pesquisas resumidas, sem dados identificáveis',
+          security: [{ bearerAuth: [] }],
+          responses: {
+            '200': { description: 'Registros resumidos e limitados ao escopo do perfil' },
+            '403': { description: 'Perfil sem permissão para consultar pesquisas' },
+          },
+        },
+      },
     },
     '/dashboard/setores': {
       get: {
@@ -297,6 +321,7 @@ export const openApiDocument = {
     '/tvwall': {
       get: {
         summary: 'Dados agregados para TV Wall',
+        security: [],
         responses: {
           '200': { description: 'Dados agregados da experiência do paciente' },
         },

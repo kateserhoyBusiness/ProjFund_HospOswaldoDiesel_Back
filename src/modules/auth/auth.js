@@ -134,6 +134,7 @@ router.post('/auth/login', asyncHandler(async (req, res) => {
       nome: safeUser.nome,
       email: safeUser.email,
       perfil: safeUser.perfil,
+      setor_id: safeUser.setor_id,
       permissoes: safeUser.permissoes,
     },
   });

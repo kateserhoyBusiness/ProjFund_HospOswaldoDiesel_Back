@@ -17,7 +17,8 @@ router.get('/tvwall', asyncHandler(async (_req, res) => {
       ),
       query(
         `SELECT s.nome, s.slug, COUNT(p.nps_nota)::integer AS total,
-                ARRAY_AGG(p.nps_nota) FILTER (WHERE p.nps_nota IS NOT NULL) AS notas
+                ARRAY_AGG(p.nps_nota) FILTER (WHERE p.nps_nota IS NOT NULL) AS notas,
+                ARRAY_AGG(p.media_parcial) FILTER (WHERE p.media_parcial IS NOT NULL) AS medias
          FROM sector s LEFT JOIN survey p ON p.setor_id = s.id
          WHERE s.ativo = TRUE GROUP BY s.id ORDER BY s.id`,
       ),
@@ -34,6 +35,9 @@ router.get('/tvwall', asyncHandler(async (_req, res) => {
         slug: sector.slug,
         nps: Number(sector.total) >= MINIMUM_PUBLIC_RESPONSES
           ? calculateNps((sector.notas ?? []).map(Number))
+          : null,
+        media: Number(sector.total) >= MINIMUM_PUBLIC_RESPONSES
+          ? calculateAverage((sector.medias ?? []).map(Number))
           : null,
         total_respostas: Number(sector.total) >= MINIMUM_PUBLIC_RESPONSES ? Number(sector.total) : null,
       })),
@@ -56,6 +60,10 @@ router.get('/tvwall', asyncHandler(async (_req, res) => {
       nps: (() => {
         const scores = appStore.pesquisas.filter((item) => item.setor_id === setor.id && item.nps_nota !== null).map((item) => item.nps_nota);
         return scores.length >= MINIMUM_PUBLIC_RESPONSES ? calculateNps(scores) : null;
+      })(),
+      media: (() => {
+        const scores = appStore.pesquisas.filter((item) => item.setor_id === setor.id && item.media_parcial !== null).map((item) => item.media_parcial);
+        return scores.length >= MINIMUM_PUBLIC_RESPONSES ? calculateAverage(scores) : null;
       })(),
       total_respostas: (() => {
         const total = appStore.pesquisas.filter((item) => item.setor_id === setor.id && item.nps_nota !== null).length;

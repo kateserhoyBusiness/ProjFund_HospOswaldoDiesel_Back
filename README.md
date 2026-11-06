@@ -19,7 +19,11 @@ Backend do Sistema de Gestão da Experiência do Paciente para a Fundação Hosp
 - `npm run migrate`
 - `npm run seed`
 
-## Supabase / Render
+## Configuração
+
+Copy `.env.example` to `.env`. For local development, `CORS_ORIGIN` must include
+the frontend origin (`http://localhost:5173`). The frontend can use its Vite
+development proxy, so browser requests are same-origin.
 
 The backend uses PostgreSQL through `pg`. Configure either `DATABASE_URL` or all of
 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`; do not set both
@@ -28,8 +32,15 @@ connection details. TLS is enabled by default; set `DB_SSL=false` only for a
 trusted local PostgreSQL instance.
 
 Also configure `JWT_SECRET` with a random value of at least 32 characters and
-`CORS_ORIGIN` with the frontend's public URL. Render provides `PORT` automatically.
-Production refuses to start without a database connection and a strong JWT secret.
+`CORS_ORIGIN` with the exact frontend origin (or comma-separated origins, without
+trailing slashes). Render provides `PORT` automatically. Production refuses to
+start without a database connection, a strong JWT secret, and an explicit CORS
+origin; wildcard CORS is only for local development.
+
+For in-memory local development, run `npm install` and `npm run dev`. The seeded
+development accounts are `super@fundacao.com` / `super123` and
+`ouvidoria@fundacao.com` / `ouvidoria123`. Do not use these credentials in
+production.
 
 After configuring the database variables, apply the schema and starter data once:
 
@@ -61,6 +72,16 @@ A aplicação foi projetada para funcionar com Postgres em produção e com fall
 - `POST /api/pesquisas`
 - `PUT /api/pesquisas/:id/respostas/:perguntaId`
 - `POST /api/pesquisas/:id/finalizar`
+- `POST /api/pesquisas/:id/manifestacoes`
+- `POST /api/auth/login` and `GET /api/auth/me`
+- `GET /api/admin/perguntas`, `POST/PATCH /api/admin/perguntas`
+- `POST /api/admin/setores`
 - `GET /api/dashboard/resumo`
+- `GET /api/dashboard/pesquisas`
+- `GET /api/manifestacoes` and `PATCH /api/manifestacoes/:id`
 - `GET /api/tvwall`
 - `GET /docs`
+
+Survey responses and feedback require the per-survey `x-survey-token`; staff
+endpoints use `Authorization: Bearer <JWT>`. The frontend adapter translates
+these Portuguese API payloads to its UI models.

@@ -22,7 +22,6 @@ app.use(helmet());
 app.use(
   cors({
     origin: env.corsOrigin === '*' ? true : env.corsOrigin.split(',').map((item) => item.trim()),
-    credentials: true,
   }),
 );
 app.use(express.json({ limit: '1mb' }));

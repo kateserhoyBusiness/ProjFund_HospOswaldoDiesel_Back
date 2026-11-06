@@ -8,10 +8,22 @@ const router = Router();
 
 router.get('/manifestacoes', requireAuth, requirePermission('ouvidoria'), asyncHandler(async (_req, res) => {
   if (databaseConfigured) {
-    const result = await query('SELECT * FROM feedback ORDER BY data DESC, id DESC');
+    const result = await query(
+      `SELECT f.*, s.slug AS setor_slug
+       FROM feedback f
+       JOIN survey p ON p.id = f.pesquisa_id
+       JOIN sector s ON s.id = p.setor_id
+       ORDER BY f.data DESC, f.id DESC`,
+    );
     return res.json(result.rows);
   }
-  res.json(appStore.manifestacoes);
+  res.json(appStore.manifestacoes.map((manifestation) => {
+    const survey = appStore.pesquisas.find((item) => item.id === manifestation.pesquisa_id)
+    return {
+      ...manifestation,
+      setor_slug: appStore.setores.find((item) => item.id === survey?.setor_id)?.slug,
+    }
+  }));
 }));
 
 router.get('/manifestacoes/:id', requireAuth, requirePermission('ouvidoria'), asyncHandler(async (req, res) => {
