@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import { appStore } from '../../core/memory.js';
 import { requireAuth, requirePermission } from '../auth/auth.js';
 import { asyncHandler, databaseConfigured, query } from '../../runtime/database.js';
@@ -37,6 +38,105 @@ const teamSchema = z.object({
   nome: z.string().trim().min(2).max(150),
   data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   turno: z.enum(['manha', 'tarde', 'noite']),
+});
+
+const assignablePermissions = new Set(['admin_setor', 'gestao', 'ouvidoria', 'visualizador']);
+const passwordSchema = z.string().min(8).max(72).refine(
+  (password) => Buffer.byteLength(password, 'utf8') <= 72,
+  'A senha deve ter no máximo 72 bytes.',
+);
+const accountFields = {
+  nome: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(255).transform((email) => email.toLowerCase()),
+  perfil_id: z.number().int().positive(),
+  setor_id: z.number().int().positive().nullable(),
+};
+const accountCreateSchema = z.object({
+  ...accountFields,
+  setor_id: accountFields.setor_id.optional(),
+  senha: passwordSchema,
+}).strict();
+const accountUpdateSchema = z.object({
+  nome: accountFields.nome.optional(),
+  email: accountFields.email.optional(),
+  perfil_id: accountFields.perfil_id.optional(),
+  setor_id: accountFields.setor_id.optional(),
+  senha: passwordSchema.optional(),
+  ativo: z.boolean().optional(),
+}).strict().refine((account) => Object.keys(account).length > 0, 'Informe ao menos um campo para atualizar.');
+
+const getRolePermissions = (role) => {
+  if (Array.isArray(role?.permissoes)) return role.permissoes;
+  return Array.isArray(role?.permissoes?.roles) ? role.permissoes.roles : [];
+};
+
+const getAssignablePermission = (role) => {
+  const permissions = getRolePermissions(role);
+  return permissions.length === 1 && assignablePermissions.has(permissions[0])
+    ? permissions[0]
+    : null;
+};
+
+const getAssignableRole = async (roleId) => {
+  let role;
+  if (databaseConfigured) {
+    const result = await query(
+      `SELECT id, nome, COALESCE(permissoes->'roles', '[]'::jsonb) AS permissoes
+       FROM user_role WHERE id = $1`,
+      [roleId],
+    );
+    role = result.rows[0];
+  } else {
+    role = appStore.perfis.find((item) => item.id === roleId);
+  }
+
+  if (!role || !getAssignablePermission(role)) {
+    throw new AppError('Perfil inválido ou não atribuível', 400, 'INVALID_PROFILE');
+  }
+  return { ...role, permission: getAssignablePermission(role) };
+};
+
+const getAssignableRoles = async () => {
+  const roles = databaseConfigured
+    ? (await query(
+        `SELECT id, nome, COALESCE(permissoes->'roles', '[]'::jsonb) AS permissoes
+         FROM user_role ORDER BY id`,
+      )).rows
+    : appStore.perfis;
+  return roles
+    .filter((role) => getAssignablePermission(role))
+    .map((role) => ({ ...role, perfil: getAssignablePermission(role) }));
+};
+
+const validateAccountSector = async (permission, sectorId) => {
+  if (['admin_setor', 'gestao'].includes(permission) && !sectorId) {
+    throw new AppError('Informe um setor para este perfil', 400, 'SECTOR_REQUIRED');
+  }
+  if (sectorId == null) return;
+
+  const exists = databaseConfigured
+    ? (await query('SELECT id FROM sector WHERE id = $1 AND ativo = TRUE', [sectorId])).rowCount > 0
+    : appStore.setores.some((sector) => sector.id === sectorId && sector.ativo);
+  if (!exists) throw new AppError('Setor inválido ou inativo', 400, 'INVALID_SECTOR');
+};
+
+const mapAccountConflict = (error) => {
+  if (error?.code === '23505') {
+    throw new AppError('Já existe uma conta com este e-mail', 409, 'EMAIL_ALREADY_EXISTS');
+  }
+  throw error;
+};
+
+const accountResponse = ({ id, nome, email, perfil_id, setor_id, ativo, perfil, perfil_nome, permissoes }) => ({
+  id,
+  nome,
+  email,
+  perfil_id,
+  perfil: perfil ?? (Array.isArray(permissoes) ? permissoes[0] : undefined),
+  perfil_nome,
+  setor_id: setor_id ?? null,
+  ativo,
+  permissoes: Array.isArray(permissoes) ? permissoes : [],
 });
 
 const questionUpdateSchema = z.object({
@@ -272,24 +372,176 @@ router.post('/admin/equipes', requireAuth, requireQuestionManager, asyncHandler(
 }));
 
 router.get('/admin/perfis', requireAuth, requirePermission('super_admin'), asyncHandler(async (_req, res) => {
-  if (databaseConfigured) {
-    const result = await query('SELECT id, nome, permissoes FROM user_role ORDER BY id');
-    return res.json(result.rows);
-  }
-  res.json(appStore.perfis);
+  res.json(await getAssignableRoles());
 }));
 
 router.get('/admin/usuarios', requireAuth, requirePermission('super_admin'), asyncHandler(async (_req, res) => {
   if (databaseConfigured) {
     const result = await query(
-      `SELECT u.id, u.nome, u.email, u.perfil_id, u.setor_id, u.ativo,
-              COALESCE(p.permissoes->'roles', '[]'::json) AS permissoes
+      `SELECT u.id, u.nome, u.email, u.perfil_id, u.setor_id, u.ativo, p.nome AS perfil_nome,
+              COALESCE(p.permissoes->'roles', '[]'::jsonb) AS permissoes
        FROM user_account u JOIN user_role p ON p.id = u.perfil_id
        ORDER BY u.id`,
     );
-    return res.json(result.rows);
+    return res.json(result.rows.map(accountResponse));
   }
-  res.json(appStore.usuarios.map(({ senha_hash, ...user }) => user));
+  res.json(appStore.usuarios.map((user) => {
+    const role = appStore.perfis.find((item) => item.id === user.perfil_id);
+    return accountResponse({
+      ...user,
+      perfil: user.perfil,
+      perfil_nome: role?.nome,
+      permissoes: getRolePermissions(role),
+    });
+  }));
+}));
+
+router.post('/admin/usuarios', requireAuth, requirePermission('super_admin'), asyncHandler(async (req, res) => {
+  const payload = accountCreateSchema.safeParse(req.body);
+  if (!payload.success) {
+    return res.status(400).json({ erro: 'Dados inválidos', codigo: 'VALIDATION_ERROR', detalhes: payload.error.flatten() });
+  }
+
+  const role = await getAssignableRole(payload.data.perfil_id);
+  await validateAccountSector(role.permission, payload.data.setor_id);
+  const passwordHash = await bcrypt.hash(payload.data.senha, 12);
+
+  try {
+    let account;
+    if (databaseConfigured) {
+      const duplicate = await query(
+        'SELECT id FROM user_account WHERE LOWER(email) = LOWER($1)',
+        [payload.data.email],
+      );
+      if (duplicate.rowCount) throw new AppError('Já existe uma conta com este e-mail', 409, 'EMAIL_ALREADY_EXISTS');
+      const result = await query(
+        `INSERT INTO user_account (nome, email, perfil_id, setor_id, ativo, senha_hash)
+         VALUES ($1, $2, $3, $4, TRUE, $5)
+         RETURNING id, nome, email, perfil_id, setor_id, ativo`,
+        [payload.data.nome, payload.data.email, role.id, payload.data.setor_id ?? null, passwordHash],
+      );
+      account = result.rows[0];
+    } else {
+      if (appStore.usuarios.some((user) => user.email.toLowerCase() === payload.data.email)) {
+        throw new AppError('Já existe uma conta com este e-mail', 409, 'EMAIL_ALREADY_EXISTS');
+      }
+      account = {
+        id: Math.max(0, ...appStore.usuarios.map((user) => user.id)) + 1,
+        nome: payload.data.nome,
+        email: payload.data.email,
+        perfil_id: role.id,
+        setor_id: payload.data.setor_id ?? null,
+        ativo: true,
+        senha_hash: passwordHash,
+        perfil: role.permission,
+      };
+      appStore.usuarios.push(account);
+    }
+
+    return res.status(201).json(accountResponse({
+      ...account,
+      perfil: role.permission,
+      perfil_nome: role.nome,
+      permissoes: getRolePermissions(role),
+    }));
+  } catch (error) {
+    return mapAccountConflict(error);
+  }
+}));
+
+router.patch('/admin/usuarios/:id', requireAuth, requirePermission('super_admin'), asyncHandler(async (req, res) => {
+  const payload = accountUpdateSchema.safeParse(req.body);
+  if (!payload.success) {
+    return res.status(400).json({ erro: 'Dados inválidos', codigo: 'VALIDATION_ERROR', detalhes: payload.error.flatten() });
+  }
+  const userId = Number(req.params.id);
+  if (!Number.isSafeInteger(userId) || userId < 1) {
+    throw new AppError('Conta não encontrada', 404, 'USER_NOT_FOUND');
+  }
+  if (userId === Number(req.user.id) && payload.data.ativo === false) {
+    throw new AppError('Não é permitido desativar a própria conta', 400, 'SELF_DEACTIVATION');
+  }
+
+  let current;
+  let currentRole;
+  if (databaseConfigured) {
+    const result = await query(
+      `SELECT u.id, u.nome, u.email, u.perfil_id, u.setor_id, u.ativo,
+              p.nome AS perfil_nome, COALESCE(p.permissoes->'roles', '[]'::jsonb) AS permissoes
+       FROM user_account u JOIN user_role p ON p.id = u.perfil_id
+       WHERE u.id = $1`,
+      [userId],
+    );
+    current = result.rows[0];
+    currentRole = current && {
+      id: current.perfil_id,
+      nome: current.perfil_nome,
+      permissoes: current.permissoes,
+    };
+  } else {
+    current = appStore.usuarios.find((user) => user.id === userId);
+    currentRole = current && appStore.perfis.find((role) => role.id === current.perfil_id);
+  }
+  if (!current) throw new AppError('Conta não encontrada', 404, 'USER_NOT_FOUND');
+
+  const role = payload.data.perfil_id === undefined
+    ? {
+        ...currentRole,
+        permission: getAssignablePermission(currentRole) ?? getRolePermissions(currentRole)[0],
+      }
+    : await getAssignableRole(payload.data.perfil_id);
+  const sectorId = payload.data.setor_id === undefined ? current.setor_id : payload.data.setor_id;
+  await validateAccountSector(role.permission, sectorId);
+  const email = payload.data.email ?? current.email;
+  const passwordHash = payload.data.senha ? await bcrypt.hash(payload.data.senha, 12) : null;
+
+  try {
+    let updated;
+    if (databaseConfigured) {
+      const duplicate = await query(
+        'SELECT id FROM user_account WHERE LOWER(email) = LOWER($1) AND id <> $2',
+        [email, userId],
+      );
+      if (duplicate.rowCount) throw new AppError('Já existe uma conta com este e-mail', 409, 'EMAIL_ALREADY_EXISTS');
+      const result = await query(
+        `UPDATE user_account
+         SET nome = $2, email = $3, perfil_id = $4, setor_id = $5, ativo = $6,
+             senha_hash = COALESCE($7, senha_hash)
+         WHERE id = $1
+         RETURNING id, nome, email, perfil_id, setor_id, ativo`,
+        [
+          userId,
+          payload.data.nome ?? current.nome,
+          email,
+          role.id,
+          sectorId,
+          payload.data.ativo ?? current.ativo,
+          passwordHash,
+        ],
+      );
+      updated = result.rows[0];
+    } else {
+      Object.assign(current, {
+        nome: payload.data.nome ?? current.nome,
+        email,
+        perfil_id: role.id,
+        perfil: role.permission,
+        setor_id: sectorId,
+        ativo: payload.data.ativo ?? current.ativo,
+      });
+      if (passwordHash) current.senha_hash = passwordHash;
+      updated = current;
+    }
+
+    return res.json(accountResponse({
+      ...updated,
+      perfil: role.permission,
+      perfil_nome: role.nome,
+      permissoes: getRolePermissions(role),
+    }));
+  } catch (error) {
+    return mapAccountConflict(error);
+  }
 }));
 
 export default router;

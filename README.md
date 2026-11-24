@@ -58,6 +58,37 @@ execute the SQL files in `database/`. The seed creates reference data and starte
 survey questions; it does not create a default account unless the seed credentials
 are provided.
 
+## Contas de usuários
+
+O gerenciamento de contas é feito exclusivamente pela API autenticada:
+
+- `GET /api/admin/usuarios` lista contas sem hashes de senha.
+- `POST /api/admin/usuarios` cria uma conta com `nome`, `email`, `senha`,
+  `perfil_id` e, quando aplicável, `setor_id`.
+- `PATCH /api/admin/usuarios/:id` atualiza dados, perfil/setor, senha ou
+  desativa a conta com `{"ativo": false}`.
+- `GET /api/admin/perfis` lista somente perfis que podem ser atribuídos pela
+  interface. O perfil administrador não pode ser concedido por esses endpoints.
+
+Todos exigem `Authorization: Bearer <JWT>` de um usuário cujo perfil armazenado
+no servidor seja Administrador. A API valida o perfil e o setor e armazena
+senhas com bcrypt. Contas de Gestão e Admin de Setor precisam de setor. A
+interface não deve enviar permissões para conceder acesso; a autorização é
+sempre conferida pelo backend.
+
+## Deploy no Render e Supabase
+
+No serviço **Web Service** da API no Render, configure `DATABASE_URL` (ou as
+variáveis `DB_*`) com os dados do PostgreSQL/Supabase, `JWT_SECRET` com um
+segredo aleatório de pelo menos 32 caracteres e `CORS_ORIGIN` com a origem HTTPS
+exata do Static Site. Aplique migrações e seed no banco antes de usar as rotas
+de contas. Essas credenciais ficam somente nas variáveis do serviço backend.
+
+No **Static Site** do frontend, configure somente `VITE_API_URL` com a URL HTTPS
+da API e faça um novo deploy para incorporar a variável. Nunca configure
+`DATABASE_URL`, chaves `service_role` ou outros segredos em variáveis `VITE_*`:
+variáveis Vite são incluídas no código público do navegador.
+
 ## Estrutura
 
 - `src/modules` — módulos de domínio
@@ -78,6 +109,8 @@ A aplicação foi projetada para funcionar com Postgres em produção e com fall
 - `POST /api/pesquisas/:id/finalizar`
 - `POST /api/pesquisas/:id/manifestacoes`
 - `POST /api/auth/login` and `GET /api/auth/me`
+- `GET/POST /api/admin/usuarios` and `PATCH /api/admin/usuarios/:id`
+- `GET /api/admin/perfis`
 - `GET /api/admin/perguntas`, `POST/PATCH /api/admin/perguntas`
 - `POST /api/admin/setores`
 - `GET /api/dashboard/resumo`

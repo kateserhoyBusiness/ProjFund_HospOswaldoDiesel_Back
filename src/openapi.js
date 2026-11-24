@@ -37,10 +37,38 @@ export const openApiDocument = {
           id: { type: 'integer' },
           nome: { type: 'string' },
           email: { type: 'string' },
+          perfil_id: { type: 'integer' },
           perfil: { type: 'string' },
+          perfil_nome: { type: 'string' },
           setor_id: { type: ['integer', 'null'] },
+          ativo: { type: 'boolean' },
           permissoes: { type: 'array', items: { type: 'string' } },
         },
+      },
+      AdminUsuarioCreate: {
+        type: 'object',
+        required: ['nome', 'email', 'senha', 'perfil_id'],
+        properties: {
+          nome: { type: 'string', minLength: 2, maxLength: 120 },
+          email: { type: 'string', format: 'email' },
+          senha: { type: 'string', minLength: 8, maxLength: 72 },
+          perfil_id: { type: 'integer', description: 'ID de um perfil atribuível retornado por GET /admin/perfis.' },
+          setor_id: { type: ['integer', 'null'], description: 'Obrigatório para perfis Gestão e Admin de Setor.' },
+        },
+        additionalProperties: false,
+      },
+      AdminUsuarioUpdate: {
+        type: 'object',
+        minProperties: 1,
+        properties: {
+          nome: { type: 'string', minLength: 2, maxLength: 120 },
+          email: { type: 'string', format: 'email' },
+          senha: { type: 'string', minLength: 8, maxLength: 72 },
+          perfil_id: { type: 'integer', description: 'ID de um perfil atribuível retornado por GET /admin/perfis.' },
+          setor_id: { type: ['integer', 'null'] },
+          ativo: { type: 'boolean', description: 'Use false para desativar a conta.' },
+        },
+        additionalProperties: false,
       },
       AuthLoginRequest: {
         type: 'object',
@@ -381,10 +409,29 @@ export const openApiDocument = {
     },
     '/admin/perfis': {
       get: {
-        summary: 'Lista perfis disponíveis',
+        summary: 'Lista perfis atribuíveis a contas (sem o perfil administrador)',
         security: [{ bearerAuth: [] }],
         responses: {
-          '200': { description: 'Lista de perfis' },
+          '200': {
+            description: 'Lista de perfis atribuíveis',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'integer' },
+                      nome: { type: 'string' },
+                      perfil: { type: 'string' },
+                      permissoes: { type: 'array', items: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '403': { description: 'Somente administradores podem listar perfis atribuíveis' },
         },
       },
     },
@@ -393,7 +440,43 @@ export const openApiDocument = {
         summary: 'Lista usuários do sistema',
         security: [{ bearerAuth: [] }],
         responses: {
-          '200': { description: 'Lista de usuários' },
+          '200': { description: 'Lista de contas sem hashes de senha', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Usuario' } } } } },
+          '401': { description: 'Token ausente ou inválido' },
+          '403': { description: 'Somente administradores podem listar contas' },
+        },
+      },
+      post: {
+        summary: 'Cria uma conta com senha armazenada em hash',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminUsuarioCreate' } } },
+        },
+        responses: {
+          '201': { description: 'Conta criada sem retornar hash de senha', content: { 'application/json': { schema: { $ref: '#/components/schemas/Usuario' } } } },
+          '400': { description: 'Dados, perfil ou setor inválidos' },
+          '401': { description: 'Token ausente ou inválido' },
+          '403': { description: 'Somente administradores podem criar contas' },
+          '409': { description: 'E-mail já cadastrado' },
+        },
+      },
+    },
+    '/admin/usuarios/{id}': {
+      patch: {
+        summary: 'Edita perfil/setor e dados da conta ou a desativa',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminUsuarioUpdate' } } },
+        },
+        responses: {
+          '200': { description: 'Conta atualizada sem retornar hash de senha', content: { 'application/json': { schema: { $ref: '#/components/schemas/Usuario' } } } },
+          '400': { description: 'Dados, perfil ou setor inválidos' },
+          '401': { description: 'Token ausente ou inválido' },
+          '403': { description: 'Somente administradores podem editar contas' },
+          '404': { description: 'Conta não encontrada' },
+          '409': { description: 'E-mail já cadastrado' },
         },
       },
     },
