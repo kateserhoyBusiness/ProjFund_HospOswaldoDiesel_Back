@@ -1,132 +1,87 @@
-# SGEP Backend
+# SGEP — Back-end
 
-Backend do Sistema de Gestão da Experiência do Paciente para a Fundação Hospitalar Dr. Oswaldo Diesel.
+API do Sistema de Gestão da Experiência do Paciente. Este repositório contém
+somente o back-end; não implementa telas nem substitui o briefing/aceite do
+cliente.
 
-## Stack
+## Stack e estrutura
 
-- Node.js 20
-- JavaScript
-- Express
-- PostgreSQL + Supabase
-- Zod
-- Vitest + Supertest
+- Node.js 20, JavaScript ES modules, Express e Zod.
+- PostgreSQL via `pg`; modelo e scripts em `database/`.
+- Vitest + Supertest.
+- `src/modules/`: domínios da API; `src/core/`: regras e modo em memória;
+  `src/runtime/`: configuração, conexão e erros.
 
-## Scripts
+O diretório `database/` está na raiz porque a raiz deste repositório já é o
+back-end; não há uma pasta `/backend` aninhada.
 
-- `npm install`
-- `npm run dev`
-- `npm test`
-- `npm run migrate`
-- `npm run seed`
+## Instalação e execução
 
-## Configuração
+```bash
+npm install
+npm run dev
+npm test
+```
 
-Copy `.env.example` to `.env`. For local development, `CORS_ORIGIN` must include
-the frontend origin (`http://localhost:5173`). The frontend can use its Vite
-development proxy, so browser requests are same-origin.
+O servidor local usa `PORT` (padrão 3000). Sem configuração de conexão ele usa o
+store em memória para desenvolvimento/testes. Para PostgreSQL:
 
-The backend uses PostgreSQL through `pg`. Configure either `DATABASE_URL` or all of
-`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`; do not set both
-connection formats. For Supabase on Render, use the Supabase Session Pooler
-connection details. TLS is enabled by default; set `DB_SSL=false` only for a
-trusted local PostgreSQL instance. TLS certificate verification is enabled by
-default; `DB_SSL_REJECT_UNAUTHORIZED=false` disables certificate verification
-while keeping the connection encrypted. Use this only when necessary for a
-trusted Supabase endpoint; prefer configuring the provider's CA certificate
-where available, especially in production.
+1. Copie `.env.example` para `.env` local e preencha valores de desenvolvimento.
+2. Configure **ou** `DATABASE_URL` **ou** todos os campos `DB_*`; não configure
+   os dois formatos ao mesmo tempo.
+3. Execute `npm run migrate` e, se necessário, `npm run seed`.
+4. Configure `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD` somente ao executar o
+   seed para criar/atualizar a conta administrativa inicial.
 
-Also configure `JWT_SECRET` with a random value of at least 32 characters and
-`CORS_ORIGIN` with the exact frontend origin (or comma-separated origins, without
-trailing slashes). Render provides `PORT` automatically. Production refuses to
-start without a database connection, a strong JWT secret, and an explicit CORS
-origin; wildcard CORS is only for local development.
+O `.env` é ignorado pelo Git. `.env.example` contém apenas placeholders e valores
+locais, nunca credenciais reais.
 
-For in-memory local development, run `npm install` and `npm run dev`. The seeded
-development accounts are `super@fundacao.com` / `super123` and
-`ouvidoria@fundacao.com` / `ouvidoria123`. Do not use these credentials in
-production.
+## Variáveis importantes
 
-After configuring the database variables, apply the schema and starter data once:
+- `NODE_ENV=production` no serviço publicado.
+- `JWT_SECRET`: segredo aleatório forte, com pelo menos 32 caracteres.
+- `CORS_ORIGIN`: origem HTTPS exata do consumidor web, sem barra final.
+- `DATABASE_URL` ou variáveis `DB_*`; TLS ligado por padrão.
+- `TV_WALL_PRIVATE=true`: TV Wall exige JWT e perfil Super Admin/Admin de Setor.
+  Só definir `false` se o endpoint realmente puder ser público.
+- Render fornece `PORT`.
 
-1. Run `npm run migrate`.
-2. Set `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`, then run `npm run seed` to
-   create or update the initial super-admin account. The password is stored as a
-   bcrypt hash. These two seed variables are only needed when running the seed.
+Para produção, mantenha `DB_SSL_REJECT_UNAUTHORIZED=true` sempre que possível.
+Consulte [segurança e nuvem](docs/seguranca-e-nuvem.md) antes de publicar.
 
-The migration and seed scripts connect to the configured PostgreSQL database and
-execute the SQL files in `database/`. The seed creates reference data and starter
-survey questions; it does not create a default account unless the seed credentials
-are provided.
+## Documentação do projeto
 
-## Contas de usuários
+- [Requisitos e matriz de rastreabilidade](docs/requisitos.md)
+- [Arquitetura do back-end](docs/arquitetura-backend.md)
+- [Padrões de Git e PR](docs/padroes-git.md)
+- [Plano e relatório de testes](docs/plano-e-relatorio-de-testes.md)
+- [Modelo de dados e justificativa SQL](docs/modelo-de-dados-e-requisitos.md)
+- [Padrões de banco de dados](docs/padroes-banco-de-dados.md)
+- [Mapeamento de módulos e consultas](docs/mapeamento-classes-e-consultas.md)
+- [Segurança e nuvem](docs/seguranca-e-nuvem.md)
+- [Kanban local e pendências do quadro externo](docs/kanban.md)
+- [Plano de negócios e pitch (hipóteses)](docs/plano-de-negocios-e-pitch.md)
+- [Roteiro de aceite e apresentação](docs/aceite-e-apresentacao.md)
 
-O gerenciamento de contas é feito exclusivamente pela API autenticada:
+**Kanban Trello/GitHub Projects:** link externo pendente de criação/compartilhamento.
+Até lá, o acompanhamento está no [quadro Markdown](docs/kanban.md).
 
-- `GET /api/admin/usuarios` lista contas sem hashes de senha.
-- `POST /api/admin/usuarios` cria uma conta com `nome`, `email`, `senha`,
-  `perfil_id` e, quando aplicável, `setor_ids` (array de setores).
-- `PATCH /api/admin/usuarios/:id` atualiza dados, perfil/setores, senha ou
-  desativa a conta com `{"ativo": false}`.
-- `GET /api/admin/perfis` lista somente perfis que podem ser atribuídos pela
-  interface. O perfil administrador não pode ser concedido por esses endpoints.
+## API e OpenAPI
 
-Todos exigem `Authorization: Bearer <JWT>` de um usuário cujo perfil armazenado
-no servidor seja Administrador. A API valida o perfil e todos os setores e armazena
-senhas com bcrypt. Contas de Gestão e Admin de Setor precisam de ao menos um setor.
-interface não deve enviar permissões para conceder acesso; a autorização é
-sempre conferida pelo backend.
+- OpenAPI JSON local: [http://localhost:3000/docs](http://localhost:3000/docs)
+- Health check: [http://localhost:3000/health](http://localhost:3000/health)
+- URL pública da API e link publicado do OpenAPI: pendentes de confirmação do
+  domínio do serviço Render. `/docs` serve JSON OpenAPI; não há Swagger UI
+  interativa embutida.
 
-`setor_id` continua disponível como compatibilidade para clientes antigos e
-representa o primeiro setor de `setor_ids`. O login e `/api/auth/me` retornam
-`setor_ids`.
+A maioria das rotas responde JSON; `/api/reports/excel` baixa uma planilha.
+Respostas, dados de paciente e manifestações de pesquisa exigem
+`x-survey-token`; rotas administrativas exigem `Authorization: Bearer <JWT>`.
+Consulte `/docs` para parâmetros e respostas completos.
 
-O TV Wall é privado por padrão e exige uma conta Super Admin ou Admin de Setor.
-Configure `TV_WALL_PRIVATE=false` somente quando o endpoint puder ser público;
-nesse modo, seus dados agregados continuam sujeitos ao mínimo de cinco respostas.
+## Banco e deploy
 
-## Deploy no Render e Supabase
-
-No serviço **Web Service** da API no Render, configure `DATABASE_URL` (ou as
-variáveis `DB_*`) com os dados do PostgreSQL/Supabase, `JWT_SECRET` com um
-segredo aleatório de pelo menos 32 caracteres e `CORS_ORIGIN` com a origem HTTPS
-exata do Static Site. Aplique migrações e seed no banco antes de usar as rotas
-de contas. Essas credenciais ficam somente nas variáveis do serviço backend.
-
-No **Static Site** do frontend, configure somente `VITE_API_URL` com a URL HTTPS
-da API e faça um novo deploy para incorporar a variável. Nunca configure
-`DATABASE_URL`, chaves `service_role` ou outros segredos em variáveis `VITE_*`:
-variáveis Vite são incluídas no código público do navegador.
-
-## Estrutura
-
-- `src/modules` — módulos de domínio
-- `src/shared` — utilitários comuns
-- `src/config` — configuração e conexão
-- `database` — migrations e seed SQL
-
-## Observações
-
-A aplicação foi projetada para funcionar com Postgres em produção e com fallback em memória para execução local e testes quando a conexão ao banco não está disponível.
-
-## Endpoints principais
-
-- `GET /api/setores`
-- `GET /api/setores/:slug/fluxo`
-- `POST /api/pesquisas`
-- `PUT /api/pesquisas/:id/respostas/:perguntaId`
-- `POST /api/pesquisas/:id/finalizar`
-- `POST /api/pesquisas/:id/manifestacoes`
-- `POST /api/auth/login` and `GET /api/auth/me`
-- `GET/POST /api/admin/usuarios` and `PATCH /api/admin/usuarios/:id`
-- `GET /api/admin/perfis`
-- `GET /api/admin/perguntas`, `POST/PATCH /api/admin/perguntas`
-- `POST /api/admin/setores`
-- `GET /api/dashboard/resumo`
-- `GET /api/dashboard/pesquisas`
-- `GET /api/manifestacoes` and `PATCH /api/manifestacoes/:id`
-- `GET /api/tvwall`
-- `GET /docs`
-
-Survey responses and feedback require the per-survey `x-survey-token`; staff
-endpoints use `Authorization: Bearer <JWT>`. The frontend adapter translates
-these Portuguese API payloads to its UI models.
+`npm run migrate` aplica os arquivos ordenados de `database/migrations/`;
+`database/schema.sql` descreve o esquema e `database/seed.sql` carrega dados de
+referência. O README documenta Render + Supabase, mas a URL pública, o estado do
+deploy, backups e restrições de rede precisam ser confirmados no painel cloud.
