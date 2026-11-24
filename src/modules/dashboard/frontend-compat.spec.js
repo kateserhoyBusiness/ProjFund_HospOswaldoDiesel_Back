@@ -94,4 +94,52 @@ describe('frontend integration contracts', () => {
       }
     }
   });
+
+  it('scopes dashboard and question access to every assigned sector', async () => {
+    const first = await request(app).post('/api/pesquisas').send({ setor_id: 1 });
+    const second = await request(app).post('/api/pesquisas').send({ setor_id: 2 });
+    const user = {
+      id: 9877,
+      nome: 'Gestão multi-setor',
+      email: 'gestao-multi@fundacao.com',
+      perfil_id: 3,
+      perfil: 'gestao',
+      setor_id: 1,
+      setor_ids: [1, 2],
+      ativo: true,
+      permissoes: ['gestao'],
+    };
+    appStore.usuarios.push(user);
+    const token = issueToken(user);
+
+    try {
+      const [dashboard, filtered, questions, denied, report, deniedReport] = await Promise.all([
+        request(app).get('/api/dashboard/pesquisas').set('Authorization', `Bearer ${token}`),
+        request(app).get('/api/dashboard/pesquisas?setor_id=2').set('Authorization', `Bearer ${token}`),
+        request(app).get('/api/admin/perguntas').set('Authorization', `Bearer ${token}`),
+        request(app).get('/api/admin/perguntas?setor_id=3').set('Authorization', `Bearer ${token}`),
+        request(app).get('/api/reports/excel').set('Authorization', `Bearer ${token}`),
+        request(app).get('/api/reports/excel?setor_id=3').set('Authorization', `Bearer ${token}`),
+      ]);
+
+      expect(dashboard.status).toBe(200);
+      expect(dashboard.body.map((survey) => survey.setor_slug)).toEqual(expect.arrayContaining(['recepcao', 'triagem']));
+      expect(filtered.status).toBe(200);
+      expect(filtered.body.every((survey) => survey.setor_slug === 'triagem')).toBe(true);
+      expect(questions.status).toBe(200);
+      expect(questions.body.map((question) => question.setor_id)).toEqual(expect.arrayContaining([1, 2]));
+      expect(questions.body.every((question) => [1, 2].includes(question.setor_id))).toBe(true);
+      expect(denied.status).toBe(403);
+      expect(report.status).toBe(200);
+      expect(report.text).toContain('Recepção');
+      expect(report.text).toContain('Triagem');
+      expect(deniedReport.status).toBe(403);
+    } finally {
+      appStore.usuarios.splice(appStore.usuarios.indexOf(user), 1);
+      for (const id of [first.body.pesquisa_id, second.body.pesquisa_id]) {
+        const index = appStore.pesquisas.findIndex((survey) => survey.id === id);
+        if (index >= 0) appStore.pesquisas.splice(index, 1);
+      }
+    }
+  });
 });

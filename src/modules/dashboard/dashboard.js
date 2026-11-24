@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { appStore } from '../../core/memory.js';
 import { calculateAverage, calculateNps } from '../../core/metrics.js';
-import { requireAuth } from '../auth/auth.js';
+import { getUserSectorIds, requireAuth } from '../auth/auth.js';
 import { asyncHandler, databaseConfigured, query } from '../../runtime/database.js';
 import { AppError } from '../../core/errors.js';
+import { MINIMUM_PRIVACY_RESPONSES } from '../../core/privacy.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -25,25 +26,38 @@ const getFilters = (req) => {
   const parsed = filterSchema.safeParse(req.query);
   if (!parsed.success) throw new AppError('Filtros inválidos', 400, 'VALIDATION_ERROR');
   const scoped = !req.user.permissoes?.some((permission) => ['super_admin', 'ouvidoria', 'visualizador'].includes(permission));
-  if (scoped && parsed.data.setor_id && Number(parsed.data.setor_id) !== Number(req.user.setor_id)) {
+  const setor_ids = scoped ? getUserSectorIds(req.user) : null;
+  if (scoped && !setor_ids.length) {
+    throw new AppError('Nenhum setor atribuído ao perfil', 403, 'FORBIDDEN');
+  }
+  if (scoped && parsed.data.setor_id && !setor_ids.includes(Number(parsed.data.setor_id))) {
     throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
   }
   return {
     ...parsed.data,
-    setor_id: scoped ? req.user.setor_id : parsed.data.setor_id ?? null,
+    setor_id: parsed.data.setor_id ?? null,
+    setor_ids,
   };
 };
 
 const filterSql = `($1::integer IS NULL OR p.setor_id = $1)
   AND ($2::date IS NULL OR p.data_hora::date >= $2::date)
   AND ($3::date IS NULL OR p.data_hora::date <= $3::date)
-  AND ($4::text IS NULL OR p.turno = $4)`;
+  AND ($4::text IS NULL OR p.turno = $4)
+  AND ($5::integer[] IS NULL OR p.setor_id = ANY($5))`;
 
-const filterValues = (filters) => [filters.setor_id ?? null, filters.data_inicio ?? null, filters.data_fim ?? null, filters.turno ?? null];
+const filterValues = (filters) => [
+  filters.setor_id ?? null,
+  filters.data_inicio ?? null,
+  filters.data_fim ?? null,
+  filters.turno ?? null,
+  filters.setor_ids,
+];
 
 const applyMemoryFilters = (surveys, filters) => surveys.filter((survey) => {
   const date = survey.data_hora?.slice(0, 10);
   return (!filters.setor_id || survey.setor_id === Number(filters.setor_id))
+    && (!filters.setor_ids || filters.setor_ids.includes(Number(survey.setor_id)))
     && (!filters.turno || survey.turno === filters.turno)
     && (!filters.data_inicio || date >= filters.data_inicio)
     && (!filters.data_fim || date <= filters.data_fim);
@@ -58,7 +72,15 @@ router.get('/dashboard/resumo', requireAuth, requireDashboardAccess, asyncHandle
               COUNT(*) FILTER (WHERE status = 'concluida')::integer AS concluidas,
               AVG(media_parcial) AS media,
               ARRAY_AGG(nps_nota) FILTER (WHERE nps_nota IS NOT NULL) AS notas,
-              (SELECT COUNT(*)::integer FROM feedback WHERE status IN ('aberta', 'em_tratamento')) AS manifestacoes_abertas
+              (SELECT COUNT(*)::integer
+               FROM feedback f JOIN survey fp ON fp.id = f.pesquisa_id
+               WHERE f.status IN ('aberta', 'em_tratamento')
+                 AND ($1::integer IS NULL OR fp.setor_id = $1)
+                 AND ($2::date IS NULL OR fp.data_hora::date >= $2::date)
+                 AND ($3::date IS NULL OR fp.data_hora::date <= $3::date)
+                 AND ($4::text IS NULL OR fp.turno = $4)
+                 AND ($5::integer[] IS NULL OR fp.setor_id = ANY($5))
+              ) AS manifestacoes_abertas
        FROM survey p WHERE ${filterSql}`,
       filterValues(filters),
     );
@@ -75,6 +97,7 @@ router.get('/dashboard/resumo', requireAuth, requireDashboardAccess, asyncHandle
   }
 
   const surveys = applyMemoryFilters(appStore.pesquisas, filters);
+  const surveyIds = new Set(surveys.map((survey) => survey.id));
   const notas = surveys.filter((item) => item.nps_nota !== null).map((item) => item.nps_nota);
   const totalParciais = surveys.filter((item) => item.status === 'parcial').length;
   res.json({
@@ -84,7 +107,8 @@ router.get('/dashboard/resumo', requireAuth, requireDashboardAccess, asyncHandle
     pesquisas_concluidas: surveys.filter((item) => item.status === 'concluida').length,
     percentual_parciais: surveys.length ? (totalParciais / surveys.length) * 100 : 0,
     filtros: filters,
-    manifestacoes_abertas: appStore.manifestacoes.filter((item) => ['aberta', 'em_tratamento'].includes(item.status)).length,
+    manifestacoes_abertas: appStore.manifestacoes.filter((item) =>
+      ['aberta', 'em_tratamento'].includes(item.status) && surveyIds.has(item.pesquisa_id)).length,
   });
 }));
 
@@ -97,7 +121,7 @@ router.get('/dashboard/pesquisas', requireAuth, requireDashboardAccess, asyncHan
   if (databaseConfigured) {
     const result = await query(
       `SELECT p.id, s.slug AS setor_slug, p.data_hora, p.turno,
-              CASE WHEN e.id IS NOT NULL AND COUNT(p.id) OVER (PARTITION BY e.id) >= 5
+              CASE WHEN e.id IS NOT NULL AND COUNT(p.id) OVER (PARTITION BY e.id) >= ${MINIMUM_PRIVACY_RESPONSES}
                    THEN e.nome ELSE NULL END AS equipe,
               p.media_parcial, p.nps_nota, p.status
        FROM survey p
@@ -123,7 +147,7 @@ router.get('/dashboard/pesquisas', requireAuth, requireDashboardAccess, asyncHan
       setor_slug: appStore.setores.find((item) => item.id === survey.setor_id)?.slug,
       data_hora: survey.data_hora,
       turno: survey.turno,
-      equipe: team && (teamCounts.get(team.id) ?? 0) >= 5 ? team.nome : null,
+      equipe: team && (teamCounts.get(team.id) ?? 0) >= MINIMUM_PRIVACY_RESPONSES ? team.nome : null,
       media_parcial: survey.media_parcial,
       nps_nota: survey.nps_nota,
       status: survey.status,
@@ -139,8 +163,13 @@ router.get('/dashboard/setores', requireAuth, requireDashboardAccess, asyncHandl
               ARRAY_AGG(p.nps_nota) FILTER (WHERE p.nps_nota IS NOT NULL) AS notas,
               AVG(p.media_parcial) FILTER (WHERE p.nps_nota IS NOT NULL) AS media
        FROM sector s
-       LEFT JOIN survey p ON p.setor_id = s.id
-       WHERE s.ativo = TRUE AND ${filterSql}
+      LEFT JOIN survey p ON p.setor_id = s.id
+        AND ($2::date IS NULL OR p.data_hora::date >= $2::date)
+        AND ($3::date IS NULL OR p.data_hora::date <= $3::date)
+        AND ($4::text IS NULL OR p.turno = $4)
+      WHERE s.ativo = TRUE
+        AND ($1::integer IS NULL OR s.id = $1)
+        AND ($5::integer[] IS NULL OR s.id = ANY($5))
        GROUP BY s.id
        ORDER BY s.id`,
       filterValues(filters),
@@ -154,7 +183,9 @@ router.get('/dashboard/setores', requireAuth, requireDashboardAccess, asyncHandl
   }
 
   const surveys = applyMemoryFilters(appStore.pesquisas, filters);
-  const setores = appStore.setores.filter((setor) => setor.ativo && (!filters.setor_id || setor.id === Number(filters.setor_id))).map((setor) => {
+  const setores = appStore.setores.filter((setor) => setor.ativo
+    && (!filters.setor_id || setor.id === Number(filters.setor_id))
+    && (!filters.setor_ids || filters.setor_ids.includes(Number(setor.id)))).map((setor) => {
     const pesquisas = surveys.filter((item) => item.setor_id === setor.id && item.nps_nota !== null);
     return {
       setor_id: setor.id,
@@ -170,7 +201,7 @@ router.get('/dashboard/setores/:id/turnos', requireAuth, requireDashboardAccess,
   const setorId = Number(req.params.id);
   const filters = getFilters(req);
   const unrestricted = req.user.permissoes?.some((permission) => ['super_admin', 'ouvidoria', 'visualizador'].includes(permission));
-  if (!unrestricted && Number(req.user.setor_id) !== setorId) {
+  if (!unrestricted && !getUserSectorIds(req.user).includes(setorId)) {
     throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
   }
   const turnos = ['manha', 'tarde', 'noite'];
@@ -231,6 +262,7 @@ router.get('/dashboard/equipes', requireAuth, requireDashboardAccess, asyncHandl
          AND ($2::date IS NULL OR e.data >= $2::date)
          AND ($3::date IS NULL OR e.data <= $3::date)
          AND ($4::text IS NULL OR e.turno = $4)
+         AND ($5::integer[] IS NULL OR e.setor_id = ANY($5))
        GROUP BY e.id, s.id ORDER BY e.data DESC, e.turno`,
       filterValues(filters),
     );
@@ -244,6 +276,7 @@ router.get('/dashboard/equipes', requireAuth, requireDashboardAccess, asyncHandl
     const surveys = applyMemoryFilters(appStore.pesquisas, filters);
     teams = (appStore.equipes ?? [])
       .filter((team) => (!filters.setor_id || team.setor_id === Number(filters.setor_id))
+        && (!filters.setor_ids || filters.setor_ids.includes(Number(team.setor_id)))
         && (!filters.data_inicio || team.data >= filters.data_inicio)
         && (!filters.data_fim || team.data <= filters.data_fim)
         && (!filters.turno || team.turno === filters.turno))

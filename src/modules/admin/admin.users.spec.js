@@ -88,13 +88,14 @@ describe('admin user accounts', () => {
         email: 'gestao-nova@fundacao.com',
         senha: 'senha-forte-123',
         perfil_id: 3,
-        setor_id: 1,
+        setor_ids: [1, 2],
       });
     expect(validCreate.status).toBe(201);
     expect(validCreate.body).toMatchObject({
       email: 'gestao-nova@fundacao.com',
       perfil: 'gestao',
       setor_id: 1,
+      setor_ids: [1, 2],
       permissoes: ['gestao'],
     });
     expect(validCreate.body).not.toHaveProperty('senha_hash');
@@ -103,6 +104,12 @@ describe('admin user accounts', () => {
     const account = appStore.usuarios.find((user) => user.id === validCreate.body.id);
     expect(account.senha_hash).not.toBe('senha-forte-123');
     expect(account.senha_hash).toMatch(/^\$2[aby]\$/);
+
+    const multiSectorLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'gestao-nova@fundacao.com', senha: 'senha-forte-123' });
+    expect(multiSectorLogin.status).toBe(200);
+    expect(multiSectorLogin.body.usuario.setor_ids).toEqual([1, 2]);
 
     const withoutSector = await request(app)
       .post('/api/admin/usuarios')
@@ -142,12 +149,19 @@ describe('admin user accounts', () => {
     expect(privilegedProfile.status).toBe(400);
     expect(privilegedProfile.body.codigo).toBe('INVALID_PROFILE');
 
+    const multiSectorUpdate = await request(app)
+      .patch(`/api/admin/usuarios/${validCreate.body.id}`)
+      .set(headers)
+      .send({ perfil_id: 2, setor_ids: [2, 3] });
+    expect(multiSectorUpdate.status).toBe(200);
+    expect(multiSectorUpdate.body.setor_ids).toEqual([2, 3]);
+
     const updated = await request(app)
       .patch(`/api/admin/usuarios/${validCreate.body.id}`)
       .set(headers)
       .send({ perfil_id: 2, setor_id: 2 });
     expect(updated.status).toBe(200);
-    expect(updated.body).toMatchObject({ perfil: 'admin_setor', setor_id: 2 });
+    expect(updated.body).toMatchObject({ perfil: 'admin_setor', setor_id: 2, setor_ids: [2] });
 
     const invalidUpdate = await request(app)
       .patch(`/api/admin/usuarios/${validCreate.body.id}`)
@@ -166,7 +180,7 @@ describe('admin user accounts', () => {
       .post('/api/auth/login')
       .send({ email: 'gestao-nova@fundacao.com', senha: 'senha-forte-123' });
     expect(loginAfterDeactivation.status).toBe(401);
-  });
+  }, 10000);
 
   it('denies account management to every non-administrator profile', async () => {
     const token = await login('super@fundacao.com', 'super123');

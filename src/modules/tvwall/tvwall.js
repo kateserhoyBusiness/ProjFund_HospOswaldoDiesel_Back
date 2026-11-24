@@ -1,12 +1,22 @@
 import { Router } from 'express';
 import { appStore } from '../../core/memory.js';
 import { calculateAverage, calculateNps } from '../../core/metrics.js';
+import { MINIMUM_PRIVACY_RESPONSES } from '../../core/privacy.js';
+import { AppError } from '../../core/errors.js';
+import { env } from '../../runtime/env.js';
 import { asyncHandler, databaseConfigured, query } from '../../runtime/database.js';
+import { requireAuth } from '../auth/auth.js';
 
 const router = Router();
-const MINIMUM_PUBLIC_RESPONSES = 5;
+const MINIMUM_PUBLIC_RESPONSES = MINIMUM_PRIVACY_RESPONSES;
 
-router.get('/tvwall', asyncHandler(async (_req, res) => {
+const requireTvWallAdmin = (req, _res, next) => {
+  const allowed = ['super_admin', 'admin_setor'];
+  if ((req.user?.permissoes ?? []).some((permission) => allowed.includes(permission))) return next();
+  return next(new AppError('Permissão administrativa insuficiente', 403, 'FORBIDDEN'));
+};
+
+router.get('/tvwall', ...(env.tvWallPrivate ? [requireAuth, requireTvWallAdmin] : []), asyncHandler(async (_req, res) => {
   if (databaseConfigured) {
     const [surveys, sectors, compliments] = await Promise.all([
       query(

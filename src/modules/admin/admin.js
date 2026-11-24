@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { appStore } from '../../core/memory.js';
-import { requireAuth, requirePermission } from '../auth/auth.js';
-import { asyncHandler, databaseConfigured, query } from '../../runtime/database.js';
+import { getUserSectorIds, requireAuth, requirePermission } from '../auth/auth.js';
+import { asyncHandler, databaseConfigured, query, withTransaction } from '../../runtime/database.js';
 import { AppError } from '../../core/errors.js';
 
 const router = Router();
@@ -49,21 +49,32 @@ const accountFields = {
   nome: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(255).transform((email) => email.toLowerCase()),
   perfil_id: z.number().int().positive(),
-  setor_id: z.number().int().positive().nullable(),
+  setor_id: z.number().int().positive().nullable().optional(),
+  setor_ids: z.array(z.number().int().positive()).optional(),
 };
 const accountCreateSchema = z.object({
   ...accountFields,
-  setor_id: accountFields.setor_id.optional(),
   senha: passwordSchema,
-}).strict();
+}).strict().superRefine((account, context) => {
+  if (account.setor_ids && new Set(account.setor_ids).size !== account.setor_ids.length) {
+    context.addIssue({ code: 'custom', path: ['setor_ids'], message: 'Não repita setores.' });
+  }
+});
 const accountUpdateSchema = z.object({
   nome: accountFields.nome.optional(),
   email: accountFields.email.optional(),
   perfil_id: accountFields.perfil_id.optional(),
   setor_id: accountFields.setor_id.optional(),
+  setor_ids: accountFields.setor_ids,
   senha: passwordSchema.optional(),
   ativo: z.boolean().optional(),
-}).strict().refine((account) => Object.keys(account).length > 0, 'Informe ao menos um campo para atualizar.');
+}).strict()
+  .superRefine((account, context) => {
+    if (account.setor_ids && new Set(account.setor_ids).size !== account.setor_ids.length) {
+      context.addIssue({ code: 'custom', path: ['setor_ids'], message: 'Não repita setores.' });
+    }
+  })
+  .refine((account) => Object.keys(account).length > 0, 'Informe ao menos um campo para atualizar.');
 
 const getRolePermissions = (role) => {
   if (Array.isArray(role?.permissoes)) return role.permissoes;
@@ -108,16 +119,18 @@ const getAssignableRoles = async () => {
     .map((role) => ({ ...role, perfil: getAssignablePermission(role) }));
 };
 
-const validateAccountSector = async (permission, sectorId) => {
-  if (['admin_setor', 'gestao'].includes(permission) && !sectorId) {
-    throw new AppError('Informe um setor para este perfil', 400, 'SECTOR_REQUIRED');
+const validateAccountSectors = async (permission, sectorIds) => {
+  if (['admin_setor', 'gestao'].includes(permission) && !sectorIds.length) {
+    throw new AppError('Informe ao menos um setor para este perfil', 400, 'SECTOR_REQUIRED');
   }
-  if (sectorId == null) return;
+  if (!sectorIds.length) return;
 
-  const exists = databaseConfigured
-    ? (await query('SELECT id FROM sector WHERE id = $1 AND ativo = TRUE', [sectorId])).rowCount > 0
-    : appStore.setores.some((sector) => sector.id === sectorId && sector.ativo);
-  if (!exists) throw new AppError('Setor inválido ou inativo', 400, 'INVALID_SECTOR');
+  const validIds = databaseConfigured
+    ? (await query('SELECT id FROM sector WHERE id = ANY($1::integer[]) AND ativo = TRUE', [sectorIds])).rows.map((row) => Number(row.id))
+    : appStore.setores.filter((sector) => sectorIds.includes(sector.id) && sector.ativo).map((sector) => sector.id);
+  if (validIds.length !== sectorIds.length) {
+    throw new AppError('Um ou mais setores são inválidos ou inativos', 400, 'INVALID_SECTOR');
+  }
 };
 
 const mapAccountConflict = (error) => {
@@ -127,17 +140,21 @@ const mapAccountConflict = (error) => {
   throw error;
 };
 
-const accountResponse = ({ id, nome, email, perfil_id, setor_id, ativo, perfil, perfil_nome, permissoes }) => ({
-  id,
-  nome,
-  email,
-  perfil_id,
-  perfil: perfil ?? (Array.isArray(permissoes) ? permissoes[0] : undefined),
-  perfil_nome,
-  setor_id: setor_id ?? null,
-  ativo,
-  permissoes: Array.isArray(permissoes) ? permissoes : [],
-});
+const accountResponse = ({ id, nome, email, perfil_id, setor_id, setor_ids, ativo, perfil, perfil_nome, permissoes }) => {
+  const normalizedSectorIds = getUserSectorIds({ setor_ids, setor_id });
+  return {
+    id,
+    nome,
+    email,
+    perfil_id,
+    perfil: perfil ?? (Array.isArray(permissoes) ? permissoes[0] : undefined),
+    perfil_nome,
+    setor_id: setor_id ?? normalizedSectorIds[0] ?? null,
+    setor_ids: normalizedSectorIds,
+    ativo,
+    permissoes: Array.isArray(permissoes) ? permissoes : [],
+  };
+};
 
 const questionUpdateSchema = z.object({
   texto: z.string().trim().min(5).max(500).optional(),
@@ -154,7 +171,23 @@ const requireQuestionManager = (req, _res, next) => {
 };
 
 const canManageSector = (user, sectorId) =>
-  user?.permissoes?.includes('super_admin') || Number(user?.setor_id) === Number(sectorId);
+  user?.permissoes?.includes('super_admin') || getUserSectorIds(user).includes(Number(sectorId));
+
+const getQuestionSectorScope = (req) => {
+  const unrestricted = req.user.permissoes?.includes('super_admin');
+  const allowedSectorIds = unrestricted ? null : getUserSectorIds(req.user);
+  const requestedSectorId = req.query.setor_id === undefined ? null : Number(req.query.setor_id);
+  if (requestedSectorId !== null) {
+    if (!Number.isSafeInteger(requestedSectorId) || !canManageSector(req.user, requestedSectorId)) {
+      throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
+    }
+    return [requestedSectorId];
+  }
+  if (!unrestricted && !allowedSectorIds.length) {
+    throw new AppError('Nenhum setor atribuído ao perfil', 403, 'FORBIDDEN');
+  }
+  return allowedSectorIds;
+};
 
 const defaultFaceOptions = [
   { valor: 1, rotulo: 'Muito ruim', emoji: '😡' },
@@ -204,10 +237,7 @@ router.post('/admin/setores', requireAuth, requirePermission('super_admin'), asy
 }));
 
 router.get('/admin/perguntas', requireAuth, requireQuestionManager, asyncHandler(async (req, res) => {
-  const setorId = req.query.setor_id ? Number(req.query.setor_id) : req.user.setor_id;
-  if (!setorId || !canManageSector(req.user, setorId)) {
-    throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
-  }
+  const sectorIds = getQuestionSectorScope(req);
 
   if (databaseConfigured) {
     const result = await query(
@@ -215,13 +245,16 @@ router.get('/admin/perguntas', requireAuth, requireQuestionManager, asyncHandler
         'id', o.id, 'valor', o.valor, 'rotulo', o.rotulo, 'emoji', o.emoji
       ) ORDER BY o.valor) FILTER (WHERE o.id IS NOT NULL), '[]'::json) AS opcoes
        FROM question p LEFT JOIN answer_option o ON o.pergunta_id = p.id
-       WHERE p.setor_id = $1 GROUP BY p.id ORDER BY p.ordem, p.id`,
-      [setorId],
+      WHERE ($1::integer[] IS NULL OR p.setor_id = ANY($1))
+      GROUP BY p.id ORDER BY p.ordem, p.id`,
+      [sectorIds],
     );
     return res.json(result.rows);
   }
 
-  const questions = appStore.perguntas.filter((item) => item.setor_id === setorId).map((question) => ({
+  const questions = appStore.perguntas
+    .filter((item) => sectorIds === null || sectorIds.includes(item.setor_id))
+    .map((question) => ({
     ...question,
     opcoes: appStore.opcoesResposta.filter((option) => option.pergunta_id === question.id),
   }));
@@ -333,21 +366,19 @@ router.patch('/admin/perguntas/:id', requireAuth, requireQuestionManager, asyncH
 }));
 
 router.get('/admin/equipes', requireAuth, requireQuestionManager, asyncHandler(async (req, res) => {
-  const setorId = req.query.setor_id ? Number(req.query.setor_id) : req.user.setor_id;
-  if (!setorId || !canManageSector(req.user, setorId)) {
-    throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
-  }
+  const sectorIds = getQuestionSectorScope(req);
   if (databaseConfigured) {
     const result = await query(
       `SELECT e.*, COUNT(es.profissional_id)::integer AS profissionais
        FROM care_team e LEFT JOIN staff_shift es ON es.equipe_id = e.id
-       WHERE e.setor_id = $1
+       WHERE ($1::integer[] IS NULL OR e.setor_id = ANY($1))
        GROUP BY e.id ORDER BY e.data DESC, e.turno`,
-      [setorId],
+      [sectorIds],
     );
     return res.json(result.rows);
   }
-  return res.json((appStore.equipes ?? []).filter((team) => team.setor_id === setorId));
+  return res.json((appStore.equipes ?? []).filter((team) =>
+    sectorIds === null || sectorIds.includes(team.setor_id)));
 }));
 
 router.post('/admin/equipes', requireAuth, requireQuestionManager, asyncHandler(async (req, res) => {
@@ -378,7 +409,13 @@ router.get('/admin/perfis', requireAuth, requirePermission('super_admin'), async
 router.get('/admin/usuarios', requireAuth, requirePermission('super_admin'), asyncHandler(async (_req, res) => {
   if (databaseConfigured) {
     const result = await query(
-      `SELECT u.id, u.nome, u.email, u.perfil_id, u.setor_id, u.ativo, p.nome AS perfil_nome,
+      `SELECT u.id, u.nome, u.email, u.perfil_id, u.setor_id,
+              COALESCE(
+                (SELECT ARRAY_AGG(us.setor_id ORDER BY (us.setor_id = u.setor_id) DESC NULLS LAST, us.setor_id)
+                 FROM user_sector us WHERE us.usuario_id = u.id),
+                CASE WHEN u.setor_id IS NULL THEN ARRAY[]::integer[] ELSE ARRAY[u.setor_id] END
+              ) AS setor_ids,
+              u.ativo, p.nome AS perfil_nome,
               COALESCE(p.permissoes->'roles', '[]'::jsonb) AS permissoes
        FROM user_account u JOIN user_role p ON p.id = u.perfil_id
        ORDER BY u.id`,
@@ -403,8 +440,11 @@ router.post('/admin/usuarios', requireAuth, requirePermission('super_admin'), as
   }
 
   const role = await getAssignableRole(payload.data.perfil_id);
-  await validateAccountSector(role.permission, payload.data.setor_id);
+  const sectorIds = payload.data.setor_ids
+    ?? (payload.data.setor_id == null ? [] : [payload.data.setor_id]);
+  await validateAccountSectors(role.permission, sectorIds);
   const passwordHash = await bcrypt.hash(payload.data.senha, 12);
+  const primarySectorId = sectorIds[0] ?? null;
 
   try {
     let account;
@@ -414,13 +454,23 @@ router.post('/admin/usuarios', requireAuth, requirePermission('super_admin'), as
         [payload.data.email],
       );
       if (duplicate.rowCount) throw new AppError('Já existe uma conta com este e-mail', 409, 'EMAIL_ALREADY_EXISTS');
-      const result = await query(
-        `INSERT INTO user_account (nome, email, perfil_id, setor_id, ativo, senha_hash)
-         VALUES ($1, $2, $3, $4, TRUE, $5)
-         RETURNING id, nome, email, perfil_id, setor_id, ativo`,
-        [payload.data.nome, payload.data.email, role.id, payload.data.setor_id ?? null, passwordHash],
-      );
-      account = result.rows[0];
+      account = await withTransaction(async (client) => {
+        const result = await client.query(
+          `INSERT INTO user_account (nome, email, perfil_id, setor_id, ativo, senha_hash)
+           VALUES ($1, $2, $3, $4, TRUE, $5)
+           RETURNING id, nome, email, perfil_id, setor_id, ativo`,
+          [payload.data.nome, payload.data.email, role.id, primarySectorId, passwordHash],
+        );
+        if (sectorIds.length) {
+          await client.query(
+            `INSERT INTO user_sector (usuario_id, setor_id)
+             SELECT $1, sectors.setor_id
+             FROM UNNEST($2::integer[]) AS sectors(setor_id)`,
+            [result.rows[0].id, sectorIds],
+          );
+        }
+        return { ...result.rows[0], setor_ids: sectorIds };
+      });
     } else {
       if (appStore.usuarios.some((user) => user.email.toLowerCase() === payload.data.email)) {
         throw new AppError('Já existe uma conta com este e-mail', 409, 'EMAIL_ALREADY_EXISTS');
@@ -430,7 +480,8 @@ router.post('/admin/usuarios', requireAuth, requirePermission('super_admin'), as
         nome: payload.data.nome,
         email: payload.data.email,
         perfil_id: role.id,
-        setor_id: payload.data.setor_id ?? null,
+        setor_id: primarySectorId,
+        setor_ids: sectorIds,
         ativo: true,
         senha_hash: passwordHash,
         perfil: role.permission,
@@ -467,6 +518,11 @@ router.patch('/admin/usuarios/:id', requireAuth, requirePermission('super_admin'
   if (databaseConfigured) {
     const result = await query(
       `SELECT u.id, u.nome, u.email, u.perfil_id, u.setor_id, u.ativo,
+              COALESCE(
+                (SELECT ARRAY_AGG(us.setor_id ORDER BY (us.setor_id = u.setor_id) DESC NULLS LAST, us.setor_id)
+                 FROM user_sector us WHERE us.usuario_id = u.id),
+                CASE WHEN u.setor_id IS NULL THEN ARRAY[]::integer[] ELSE ARRAY[u.setor_id] END
+              ) AS setor_ids,
               p.nome AS perfil_nome, COALESCE(p.permissoes->'roles', '[]'::jsonb) AS permissoes
        FROM user_account u JOIN user_role p ON p.id = u.perfil_id
        WHERE u.id = $1`,
@@ -490,8 +546,13 @@ router.patch('/admin/usuarios/:id', requireAuth, requirePermission('super_admin'
         permission: getAssignablePermission(currentRole) ?? getRolePermissions(currentRole)[0],
       }
     : await getAssignableRole(payload.data.perfil_id);
-  const sectorId = payload.data.setor_id === undefined ? current.setor_id : payload.data.setor_id;
-  await validateAccountSector(role.permission, sectorId);
+  const sectorIds = payload.data.setor_ids !== undefined
+    ? payload.data.setor_ids
+    : payload.data.setor_id !== undefined
+      ? payload.data.setor_id === null ? [] : [payload.data.setor_id]
+      : getUserSectorIds(current);
+  const sectorId = sectorIds[0] ?? null;
+  await validateAccountSectors(role.permission, sectorIds);
   const email = payload.data.email ?? current.email;
   const passwordHash = payload.data.senha ? await bcrypt.hash(payload.data.senha, 12) : null;
 
@@ -503,23 +564,34 @@ router.patch('/admin/usuarios/:id', requireAuth, requirePermission('super_admin'
         [email, userId],
       );
       if (duplicate.rowCount) throw new AppError('Já existe uma conta com este e-mail', 409, 'EMAIL_ALREADY_EXISTS');
-      const result = await query(
-        `UPDATE user_account
-         SET nome = $2, email = $3, perfil_id = $4, setor_id = $5, ativo = $6,
-             senha_hash = COALESCE($7, senha_hash)
-         WHERE id = $1
-         RETURNING id, nome, email, perfil_id, setor_id, ativo`,
-        [
-          userId,
-          payload.data.nome ?? current.nome,
-          email,
-          role.id,
-          sectorId,
-          payload.data.ativo ?? current.ativo,
-          passwordHash,
-        ],
-      );
-      updated = result.rows[0];
+      updated = await withTransaction(async (client) => {
+        const result = await client.query(
+          `UPDATE user_account
+           SET nome = $2, email = $3, perfil_id = $4, setor_id = $5, ativo = $6,
+               senha_hash = COALESCE($7, senha_hash)
+           WHERE id = $1
+           RETURNING id, nome, email, perfil_id, setor_id, ativo`,
+          [
+            userId,
+            payload.data.nome ?? current.nome,
+            email,
+            role.id,
+            sectorId,
+            payload.data.ativo ?? current.ativo,
+            passwordHash,
+          ],
+        );
+        await client.query('DELETE FROM user_sector WHERE usuario_id = $1', [userId]);
+        if (sectorIds.length) {
+          await client.query(
+            `INSERT INTO user_sector (usuario_id, setor_id)
+             SELECT $1, sectors.setor_id
+             FROM UNNEST($2::integer[]) AS sectors(setor_id)`,
+            [userId, sectorIds],
+          );
+        }
+        return { ...result.rows[0], setor_ids: sectorIds };
+      });
     } else {
       Object.assign(current, {
         nome: payload.data.nome ?? current.nome,
@@ -527,6 +599,7 @@ router.patch('/admin/usuarios/:id', requireAuth, requirePermission('super_admin'
         perfil_id: role.id,
         perfil: role.permission,
         setor_id: sectorId,
+        setor_ids: sectorIds,
         ativo: payload.data.ativo ?? current.ativo,
       });
       if (passwordHash) current.senha_hash = passwordHash;

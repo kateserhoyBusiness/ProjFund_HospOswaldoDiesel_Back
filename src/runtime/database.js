@@ -40,5 +40,25 @@ export const query = (text, values) => {
   return pool.query(text, values);
 };
 
+export const withTransaction = async (operation) => {
+  if (!pool) throw new Error('Conexão com o banco não está configurada.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await operation(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'A transação falhou e não pôde ser revertida.');
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 export const asyncHandler = (handler) => (req, res, next) =>
   Promise.resolve(handler(req, res, next)).catch(next);

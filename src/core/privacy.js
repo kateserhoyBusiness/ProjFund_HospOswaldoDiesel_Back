@@ -1,0 +1,1 @@
+export const MINIMUM_PRIVACY_RESPONSES = 5;

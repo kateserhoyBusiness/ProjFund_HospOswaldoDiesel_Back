@@ -19,15 +19,26 @@ const getProfilePermissions = (user) => {
   return perfil?.permissoes ?? [];
 };
 
-const normalizeUser = (user) => ({
-  id: user.id,
-  nome: user.nome,
-  email: user.email,
-  perfil: user.perfil ?? user.permissoes?.[0] ?? 'super_admin',
-  setor_id: user.setor_id ?? null,
-  ativo: user.ativo,
-  permissoes: Array.isArray(user.permissoes) ? user.permissoes : getProfilePermissions(user),
-});
+export const getUserSectorIds = (user) => {
+  const sectorIds = Array.isArray(user?.setor_ids) && user.setor_ids.length
+    ? user.setor_ids
+    : user?.setor_id == null ? [] : [user.setor_id];
+  return [...new Set(sectorIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))];
+};
+
+const normalizeUser = (user) => {
+  const setor_ids = getUserSectorIds(user);
+  return {
+    id: user.id,
+    nome: user.nome,
+    email: user.email,
+    perfil: user.perfil ?? user.permissoes?.[0] ?? 'super_admin',
+    setor_id: user.setor_id ?? setor_ids[0] ?? null,
+    setor_ids,
+    ativo: user.ativo,
+    permissoes: Array.isArray(user.permissoes) ? user.permissoes : getProfilePermissions(user),
+  };
+};
 
 export const issueToken = (user) =>
   jwt.sign(
@@ -35,7 +46,8 @@ export const issueToken = (user) =>
       sub: user.id,
       email: user.email,
       perfil: user.perfil,
-      setor_id: user.setor_id ?? null,
+      setor_id: user.setor_id ?? getUserSectorIds(user)[0] ?? null,
+      setor_ids: getUserSectorIds(user),
       permissoes: user.permissoes,
     },
     env.jwtSecret,
@@ -60,6 +72,11 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
   if (databaseConfigured) {
     const result = await query(
       `SELECT u.id, u.nome, u.email, u.setor_id, u.ativo,
+              COALESCE(
+                (SELECT ARRAY_AGG(us.setor_id ORDER BY (us.setor_id = u.setor_id) DESC NULLS LAST, us.setor_id)
+                 FROM user_sector us WHERE us.usuario_id = u.id),
+                CASE WHEN u.setor_id IS NULL THEN ARRAY[]::integer[] ELSE ARRAY[u.setor_id] END
+              ) AS setor_ids,
               COALESCE(p.permissoes->'roles', '[]'::jsonb) AS permissoes
        FROM user_account u
        JOIN user_role p ON p.id = u.perfil_id
@@ -103,6 +120,11 @@ router.post('/auth/login', asyncHandler(async (req, res) => {
   if (databaseConfigured) {
     const result = await query(
       `SELECT u.id, u.nome, u.email, u.setor_id, u.ativo, u.senha_hash,
+              COALESCE(
+                (SELECT ARRAY_AGG(us.setor_id ORDER BY (us.setor_id = u.setor_id) DESC NULLS LAST, us.setor_id)
+                 FROM user_sector us WHERE us.usuario_id = u.id),
+                CASE WHEN u.setor_id IS NULL THEN ARRAY[]::integer[] ELSE ARRAY[u.setor_id] END
+              ) AS setor_ids,
               COALESCE(p.permissoes->'roles', '[]'::jsonb) AS permissoes
        FROM user_account u
        JOIN user_role p ON p.id = u.perfil_id
@@ -135,6 +157,7 @@ router.post('/auth/login', asyncHandler(async (req, res) => {
       email: safeUser.email,
       perfil: safeUser.perfil,
       setor_id: safeUser.setor_id,
+      setor_ids: safeUser.setor_ids,
       permissoes: safeUser.permissoes,
     },
   });

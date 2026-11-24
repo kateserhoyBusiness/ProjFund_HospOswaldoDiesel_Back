@@ -17,4 +17,5 @@ export const env = {
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60000),
   rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 120),
+  tvWallPrivate: (process.env.TV_WALL_PRIVATE ?? 'true').toLowerCase() !== 'false',
 };

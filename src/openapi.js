@@ -1,3 +1,5 @@
+import { env } from './runtime/env.js';
+
 export const openApiDocument = {
   openapi: '3.0.0',
   info: {
@@ -41,6 +43,7 @@ export const openApiDocument = {
           perfil: { type: 'string' },
           perfil_nome: { type: 'string' },
           setor_id: { type: ['integer', 'null'] },
+          setor_ids: { type: 'array', items: { type: 'integer' } },
           ativo: { type: 'boolean' },
           permissoes: { type: 'array', items: { type: 'string' } },
         },
@@ -53,7 +56,8 @@ export const openApiDocument = {
           email: { type: 'string', format: 'email' },
           senha: { type: 'string', minLength: 8, maxLength: 72 },
           perfil_id: { type: 'integer', description: 'ID de um perfil atribuível retornado por GET /admin/perfis.' },
-          setor_id: { type: ['integer', 'null'], description: 'Obrigatório para perfis Gestão e Admin de Setor.' },
+          setor_id: { type: ['integer', 'null'], description: 'Compatibilidade; use setor_ids para múltiplos setores.' },
+          setor_ids: { type: 'array', items: { type: 'integer' }, description: 'Obrigatório com ao menos um setor para perfis Gestão e Admin de Setor.' },
         },
         additionalProperties: false,
       },
@@ -66,6 +70,7 @@ export const openApiDocument = {
           senha: { type: 'string', minLength: 8, maxLength: 72 },
           perfil_id: { type: 'integer', description: 'ID de um perfil atribuível retornado por GET /admin/perfis.' },
           setor_id: { type: ['integer', 'null'] },
+          setor_ids: { type: 'array', items: { type: 'integer' } },
           ativo: { type: 'boolean', description: 'Use false para desativar a conta.' },
         },
         additionalProperties: false,
@@ -349,7 +354,7 @@ export const openApiDocument = {
     '/tvwall': {
       get: {
         summary: 'Dados agregados para TV Wall',
-        security: [],
+        security: env.tvWallPrivate ? [{ bearerAuth: [] }] : [],
         responses: {
           '200': { description: 'Dados agregados da experiência do paciente' },
         },
@@ -463,7 +468,7 @@ export const openApiDocument = {
     },
     '/admin/usuarios/{id}': {
       patch: {
-        summary: 'Edita perfil/setor e dados da conta ou a desativa',
+        summary: 'Edita perfil/setores e dados da conta ou a desativa',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
         requestBody: {

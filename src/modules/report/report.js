@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { appStore } from '../../core/memory.js';
-import { requireAuth } from '../auth/auth.js';
+import { getUserSectorIds, requireAuth } from '../auth/auth.js';
 import { asyncHandler, databaseConfigured, query } from '../../runtime/database.js';
 import { AppError } from '../../core/errors.js';
+import { MINIMUM_PRIVACY_RESPONSES } from '../../core/privacy.js';
 
 const router = Router();
 
@@ -54,20 +55,34 @@ router.get('/reports/excel', requireAuth, requireExportAccess, asyncHandler(asyn
     return res.status(400).json({ erro: 'Filtros inválidos', codigo: 'VALIDATION_ERROR', detalhes: parsed.error.flatten() });
   }
   const scoped = !req.user.permissoes?.some((permission) => ['super_admin', 'ouvidoria', 'visualizador'].includes(permission));
-  if (scoped && parsed.data.setor_id && Number(parsed.data.setor_id) !== Number(req.user.setor_id)) {
+  const setor_ids = scoped ? getUserSectorIds(req.user) : null;
+  if (scoped && !setor_ids.length) {
+    throw new AppError('Nenhum setor atribuído ao perfil', 403, 'FORBIDDEN');
+  }
+  if (scoped && parsed.data.setor_id && !setor_ids.includes(Number(parsed.data.setor_id))) {
     throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
   }
   const filters = {
     ...parsed.data,
-    setor_id: scoped ? req.user.setor_id : parsed.data.setor_id ?? null,
+    setor_id: parsed.data.setor_id ?? null,
+    setor_ids,
   };
-  const values = [filters.setor_id, filters.data_inicio ?? null, filters.data_fim ?? null, filters.turno ?? null];
+  const values = [
+    filters.setor_id,
+    filters.data_inicio ?? null,
+    filters.data_fim ?? null,
+    filters.turno ?? null,
+    filters.setor_ids,
+  ];
   let rows;
 
   if (databaseConfigured) {
     const result = await query(
       `SELECT p.id, to_char(p.data_hora, 'YYYY-MM-DD HH24:MI:SS TZ') AS data_hora,
-              s.nome AS setor, p.turno, COALESCE(e.nome, 'Não vinculado') AS equipe,
+              s.nome AS setor, p.turno,
+              CASE WHEN e.id IS NULL THEN 'Não vinculado'
+                   WHEN COUNT(p.id) OVER (PARTITION BY e.id) >= ${MINIMUM_PRIVACY_RESPONSES}
+                   THEN e.nome ELSE NULL END AS equipe,
               p.media_parcial, p.nps_nota, p.status, p.encaminhado_ouvidoria
        FROM survey p JOIN sector s ON s.id = p.setor_id
        LEFT JOIN care_team e ON e.id = p.equipe_id
@@ -75,6 +90,7 @@ router.get('/reports/excel', requireAuth, requireExportAccess, asyncHandler(asyn
          AND ($2::date IS NULL OR p.data_hora::date >= $2::date)
          AND ($3::date IS NULL OR p.data_hora::date <= $3::date)
          AND ($4::text IS NULL OR p.turno = $4)
+         AND ($5::integer[] IS NULL OR p.setor_id = ANY($5))
        ORDER BY p.data_hora DESC`,
       values,
     );
@@ -84,22 +100,33 @@ router.get('/reports/excel', requireAuth, requireExportAccess, asyncHandler(asyn
       [req.user.id, JSON.stringify(filters)],
     );
   } else {
-    rows = appStore.pesquisas
+    const surveys = appStore.pesquisas
       .filter((survey) => (!filters.setor_id || survey.setor_id === Number(filters.setor_id))
+        && (!filters.setor_ids || filters.setor_ids.includes(Number(survey.setor_id)))
         && (!filters.turno || survey.turno === filters.turno)
         && (!filters.data_inicio || survey.data_hora.slice(0, 10) >= filters.data_inicio)
-        && (!filters.data_fim || survey.data_hora.slice(0, 10) <= filters.data_fim))
-      .map((survey) => ({
+        && (!filters.data_fim || survey.data_hora.slice(0, 10) <= filters.data_fim));
+    const teamCounts = new Map();
+    for (const survey of surveys) {
+      if (survey.equipe_id === null) continue;
+      teamCounts.set(survey.equipe_id, (teamCounts.get(survey.equipe_id) ?? 0) + 1);
+    }
+    rows = surveys.map((survey) => {
+      const team = appStore.equipes.find((item) => item.id === survey.equipe_id);
+      return ({
         id: survey.id,
         data_hora: survey.data_hora,
         setor: appStore.setores.find((sector) => sector.id === survey.setor_id)?.nome ?? '',
         turno: survey.turno,
-        equipe: appStore.equipes.find((team) => team.id === survey.equipe_id)?.nome ?? 'Não vinculado',
+        equipe: team
+          ? (teamCounts.get(team.id) ?? 0) >= MINIMUM_PRIVACY_RESPONSES ? team.nome : null
+          : 'Não vinculado',
         media_parcial: survey.media_parcial,
         nps_nota: survey.nps_nota,
         status: survey.status,
         encaminhado_ouvidoria: survey.encaminhado_ouvidoria,
-      }));
+      });
+    });
     appStore.exports.push({
       id: appStore.exports.length + 1,
       usuario_id: req.user.id,

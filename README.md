@@ -64,17 +64,25 @@ O gerenciamento de contas é feito exclusivamente pela API autenticada:
 
 - `GET /api/admin/usuarios` lista contas sem hashes de senha.
 - `POST /api/admin/usuarios` cria uma conta com `nome`, `email`, `senha`,
-  `perfil_id` e, quando aplicável, `setor_id`.
-- `PATCH /api/admin/usuarios/:id` atualiza dados, perfil/setor, senha ou
+  `perfil_id` e, quando aplicável, `setor_ids` (array de setores).
+- `PATCH /api/admin/usuarios/:id` atualiza dados, perfil/setores, senha ou
   desativa a conta com `{"ativo": false}`.
 - `GET /api/admin/perfis` lista somente perfis que podem ser atribuídos pela
   interface. O perfil administrador não pode ser concedido por esses endpoints.
 
 Todos exigem `Authorization: Bearer <JWT>` de um usuário cujo perfil armazenado
-no servidor seja Administrador. A API valida o perfil e o setor e armazena
-senhas com bcrypt. Contas de Gestão e Admin de Setor precisam de setor. A
+no servidor seja Administrador. A API valida o perfil e todos os setores e armazena
+senhas com bcrypt. Contas de Gestão e Admin de Setor precisam de ao menos um setor.
 interface não deve enviar permissões para conceder acesso; a autorização é
 sempre conferida pelo backend.
+
+`setor_id` continua disponível como compatibilidade para clientes antigos e
+representa o primeiro setor de `setor_ids`. O login e `/api/auth/me` retornam
+`setor_ids`.
+
+O TV Wall é privado por padrão e exige uma conta Super Admin ou Admin de Setor.
+Configure `TV_WALL_PRIVATE=false` somente quando o endpoint puder ser público;
+nesse modo, seus dados agregados continuam sujeitos ao mínimo de cinco respostas.
 
 ## Deploy no Render e Supabase
 

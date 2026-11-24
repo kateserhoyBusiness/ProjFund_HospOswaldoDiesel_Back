@@ -2,8 +2,12 @@ import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import app from '../../app.js';
 import { appStore } from '../../core/memory.js';
+import { env } from '../../runtime/env.js';
+import { issueToken } from '../auth/auth.js';
 
 const createdQuestions = [];
+const createdTeams = [];
+const createdSurveys = [];
 
 const loginAsSuperAdmin = async () => {
   const response = await request(app)
@@ -22,6 +26,14 @@ const currentShift = () => {
 };
 
 afterEach(() => {
+  for (const id of createdSurveys.splice(0)) {
+    const index = appStore.pesquisas.findIndex((survey) => survey.id === id);
+    if (index >= 0) appStore.pesquisas.splice(index, 1);
+  }
+  for (const id of createdTeams.splice(0)) {
+    const index = appStore.equipes.findIndex((team) => team.id === id);
+    if (index >= 0) appStore.equipes.splice(index, 1);
+  }
   for (const questionId of createdQuestions.splice(0)) {
     const index = appStore.perguntas.findIndex((question) => question.id === questionId);
     if (index >= 0) appStore.perguntas.splice(index, 1);
@@ -92,10 +104,45 @@ describe('patient experience API', () => {
   });
 
   it('serves privacy information and suppresses small public TV Wall samples', async () => {
-    const [privacy, tvwall] = await Promise.all([
-      request(app).get('/api/privacidade'),
-      request(app).get('/api/tvwall'),
-    ]);
+    const privacy = await request(app).get('/api/privacidade');
+    let tvwall;
+    if (env.tvWallPrivate) {
+      const unauthorized = await request(app).get('/api/tvwall');
+      const ouvidoriaToken = (await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'ouvidoria@fundacao.com', senha: 'ouvidoria123' })).body.token;
+      const denied = await request(app)
+        .get('/api/tvwall')
+        .set('Authorization', `Bearer ${ouvidoriaToken}`);
+      const sectorAdmin = {
+        id: 9878,
+        nome: 'Admin de setor',
+        email: 'admin-tvwall@fundacao.com',
+        perfil_id: 2,
+        perfil: 'admin_setor',
+        setor_id: 1,
+        ativo: true,
+        permissoes: ['admin_setor'],
+      };
+      appStore.usuarios.push(sectorAdmin);
+      let sectorAdminView;
+      try {
+        sectorAdminView = await request(app)
+          .get('/api/tvwall')
+          .set('Authorization', `Bearer ${issueToken(sectorAdmin)}`);
+      } finally {
+        appStore.usuarios.splice(appStore.usuarios.indexOf(sectorAdmin), 1);
+      }
+      const adminToken = await loginAsSuperAdmin();
+      expect(unauthorized.status).toBe(401);
+      expect(denied.status).toBe(403);
+      expect(sectorAdminView.status).toBe(200);
+      tvwall = await request(app)
+        .get('/api/tvwall')
+        .set('Authorization', `Bearer ${adminToken}`);
+    } else {
+      tvwall = await request(app).get('/api/tvwall');
+    }
 
     expect(privacy.status).toBe(200);
     expect(privacy.body.lei_url).toContain('l13709.htm');
@@ -116,5 +163,37 @@ describe('patient experience API', () => {
     expect(response.text).toContain('<Workbook');
     expect(response.text).toContain('NPS');
     expect(response.text).not.toContain('telefone');
+  });
+
+  it('only exports team names after the five-response privacy threshold', async () => {
+    const token = await loginAsSuperAdmin();
+    const date = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const teamForOneResponse = await request(app)
+      .post('/api/admin/equipes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ setor_id: 5, nome: `Equipe pequena ${Date.now()}`, data: date, turno: currentShift() });
+    const teamForFiveResponses = await request(app)
+      .post('/api/admin/equipes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ setor_id: 6, nome: `Equipe suficiente ${Date.now()}`, data: date, turno: currentShift() });
+    expect(teamForOneResponse.status).toBe(201);
+    expect(teamForFiveResponses.status).toBe(201);
+    createdTeams.push(teamForOneResponse.body.id, teamForFiveResponses.body.id);
+
+    for (let index = 0; index < 6; index += 1) {
+      const survey = await request(app)
+        .post('/api/pesquisas')
+        .send({ setor_id: index === 0 ? 5 : 6 });
+      expect(survey.status).toBe(201);
+      createdSurveys.push(survey.body.pesquisa_id);
+    }
+
+    const response = await request(app)
+      .get('/api/reports/excel')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.text).not.toContain(teamForOneResponse.body.nome);
+    expect(response.text).toContain(teamForFiveResponses.body.nome);
   });
 });
