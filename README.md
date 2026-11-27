@@ -7,7 +7,6 @@ e integrada a um banco PostgreSQL no Supabase.
 
 | Serviço | Ambiente |
 | --- | --- |
-| API | `https://projfund-hosposwaldodiesel-back.onrender.com` |
 | Front-end | `https://projeto-hospital-pqxh.onrender.com` |
 | Documentação OpenAPI | `https://projfund-hosposwaldodiesel-back.onrender.com/docs` |
 | Health check | `https://projfund-hosposwaldodiesel-back.onrender.com/health` |
