@@ -236,6 +236,64 @@ router.post('/admin/setores', requireAuth, requirePermission('super_admin'), asy
   return res.status(201).json(setor);
 }));
 
+router.patch('/admin/setores/:id', requireAuth, requirePermission('super_admin'), asyncHandler(async (req, res) => {
+  const setorId = Number(req.params.id);
+  if (!Number.isInteger(setorId) || setorId <= 0) throw new AppError('Setor inválido', 400, 'INVALID_SECTOR');
+
+  const payload = setorSchema.partial().safeParse(req.body);
+  if (!payload.success) {
+    return res.status(400).json({ erro: 'Dados inválidos', codigo: 'VALIDATION_ERROR', detalhes: payload.error.flatten() });
+  }
+
+  const current = appStore.setores.find((setor) => setor.id === setorId);
+  if (databaseConfigured) {
+    const existing = await query('SELECT * FROM sector WHERE id = $1', [setorId]);
+    if (!existing.rows.length) throw new AppError('Setor não encontrado', 404, 'SECTOR_NOT_FOUND');
+  } else if (!current) {
+    throw new AppError('Setor não encontrado', 404, 'SECTOR_NOT_FOUND');
+  }
+
+  const base = databaseConfigured ? (await query('SELECT * FROM sector WHERE id = $1', [setorId])).rows[0] : current;
+  const nome = payload.data.nome ?? base.nome;
+  const slug = payload.data.slug ?? base.slug;
+  const ativo = payload.data.ativo ?? base.ativo;
+  const duplicate = appStore.setores.find((setor) => setor.id !== setorId && setor.slug === slug);
+  if (databaseConfigured) {
+    const duplicateResult = await query('SELECT id FROM sector WHERE slug = $1 AND id <> $2', [slug, setorId]);
+    if (duplicateResult.rows.length) throw new AppError('Já existe um setor com este endereço', 409, 'SECTOR_SLUG_EXISTS');
+  } else if (duplicate) {
+    throw new AppError('Já existe um setor com este endereço', 409, 'SECTOR_SLUG_EXISTS');
+  }
+
+  if (databaseConfigured) {
+    const result = await query(
+      `UPDATE sector SET nome = $1, slug = $2, url = $3, qrcode = $4, ativo = $5
+       WHERE id = $6 RETURNING *`,
+      [nome, slug, `/pesquisa/${slug}`, `/pesquisa/${slug}`, ativo, setorId],
+    );
+    return res.json(result.rows[0]);
+  }
+
+  Object.assign(current, { nome, slug, url: `/pesquisa/${slug}`, qrcode: `/pesquisa/${slug}`, ativo });
+  return res.json(current);
+}));
+
+router.delete('/admin/setores/:id', requireAuth, requirePermission('super_admin'), asyncHandler(async (req, res) => {
+  const setorId = Number(req.params.id);
+  if (!Number.isInteger(setorId) || setorId <= 0) throw new AppError('Setor inválido', 400, 'INVALID_SECTOR');
+
+  if (databaseConfigured) {
+    const result = await query('UPDATE sector SET ativo = FALSE WHERE id = $1 RETURNING *', [setorId]);
+    if (!result.rows.length) throw new AppError('Setor não encontrado', 404, 'SECTOR_NOT_FOUND');
+    return res.json(result.rows[0]);
+  }
+
+  const setor = appStore.setores.find((item) => item.id === setorId);
+  if (!setor) throw new AppError('Setor não encontrado', 404, 'SECTOR_NOT_FOUND');
+  setor.ativo = false;
+  return res.json(setor);
+}));
+
 router.get('/admin/perguntas', requireAuth, requireQuestionManager, asyncHandler(async (req, res) => {
   const sectorIds = getQuestionSectorScope(req);
 
