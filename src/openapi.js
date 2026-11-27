@@ -412,6 +412,24 @@ export const openApiDocument = {
         },
       },
     },
+    '/admin/setores/{id}': {
+      patch: {
+        summary: 'Atualiza os dados ou o status de um setor',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': { description: 'Setor atualizado' },
+          '404': { description: 'Setor não encontrado' },
+        },
+      },
+      delete: {
+        summary: 'Desativa um setor',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': { description: 'Setor desativado' },
+          '404': { description: 'Setor não encontrado' },
+        },
+      },
+    },
     '/admin/perfis': {
       get: {
         summary: 'Lista perfis atribuíveis a contas (sem o perfil administrador)',
