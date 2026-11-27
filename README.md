@@ -1,87 +1,191 @@
-# SGEP — Back-end
+# SGEP - Back-end
 
-API do Sistema de Gestão da Experiência do Paciente. Este repositório contém
-somente o back-end; não implementa telas nem substitui o briefing/aceite do
-cliente.
+API do Sistema de Gestão da Experiência do Paciente (SGEP), hospedada no Render
+e integrada a um banco PostgreSQL no Supabase.
 
-## Stack e estrutura
+## Serviços publicados
 
-- Node.js 20, JavaScript ES modules, Express e Zod.
-- PostgreSQL via `pg`; modelo e scripts em `database/`.
-- Vitest + Supertest.
-- `src/modules/`: domínios da API; `src/core/`: regras e modo em memória;
-  `src/runtime/`: configuração, conexão e erros.
+| Serviço | Ambiente |
+| --- | --- |
+| API | `https://projfund-hosposwaldodiesel-back.onrender.com` |
+| Front-end | `https://projeto-hospital-pqxh.onrender.com` |
+| Documentação OpenAPI | `https://projfund-hosposwaldodiesel-back.onrender.com/docs` |
+| Health check | `https://projfund-hosposwaldodiesel-back.onrender.com/health` |
 
-O diretório `database/` está na raiz porque a raiz deste repositório já é o
-back-end; não há uma pasta `/backend` aninhada.
+As URLs devem ser confirmadas no painel do Render caso o projeto seja criado
+novamente ou vinculado a outro workspace.
 
-## Instalação e execução
+## Arquitetura
+
+- Node.js 20+, JavaScript ES modules e Express.
+- PostgreSQL/Supabase via `pg`.
+- Zod para validação de entradas.
+- JWT para autenticação administrativa.
+- Helmet, CORS e limite de requisições.
+- Vitest e Supertest para testes.
+- OpenAPI disponível em `/docs`.
+
+Estrutura principal:
+
+```text
+src/
+  app.js                 Rotas, middleware e health check
+  server.js              Inicialização e validações de produção
+  openapi.js             Documento OpenAPI
+  config/                Configuração e banco
+  runtime/               Ambiente e conexões
+  modules/               Domínios da API
+database/
+  migrations/            Migrações versionadas
+  schema.sql             Estrutura completa
+  seed.sql               Dados de referência
+docs/                    Documentação funcional e técnica
+```
+
+## Configuração no Render
+
+Crie um **Web Service** usando o repositório do back-end:
+
+- Runtime: Node
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Health Check Path: `/health`
+- Branch: a branch que contém a versão publicada
+
+Configure estas variáveis no ambiente do serviço:
+
+| Variável | Valor de produção |
+| --- | --- |
+| `NODE_ENV` | `production` |
+| `PORT` | fornecida automaticamente pelo Render |
+| `DATABASE_URL` | URL de conexão PostgreSQL/Supabase |
+| `JWT_SECRET` | segredo aleatório com pelo menos 32 caracteres |
+| `CORS_ORIGIN` | `https://projeto-hospital-pqxh.onrender.com` |
+| `DB_SSL` | `true` |
+| `DB_SSL_REJECT_UNAUTHORIZED` | `true` |
+| `TV_WALL_PRIVATE` | `true` |
+| `RATE_LIMIT_WINDOW_MS` | `60000` |
+| `RATE_LIMIT_MAX` | `120` |
+
+`DATABASE_URL` é o formato recomendado para o Render. Alternativamente, configure
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD`, mas não misture os
+dois formatos. Não use `*` como `CORS_ORIGIN` em produção.
+
+Para criar ou atualizar o usuário administrador inicial no banco:
+
+```text
+SEED_ADMIN_EMAIL=<e-mail-do-administrador>
+SEED_ADMIN_PASSWORD=<senha-forte>
+```
+
+Execute as migrações e o seed pelo Shell do Render ou por outro ambiente seguro
+conectado ao mesmo banco:
+
+```bash
+npm run migrate
+npm run seed
+```
+
+Não execute o seed contra dados reais sem revisar
+`src/scripts/run-seed.js` e `database/seed.sql`. Não coloque senhas reais no
+repositório ou em arquivos `.env`.
+
+## Desenvolvimento local opcional
+
+A execução local serve apenas para desenvolvimento e testes:
 
 ```bash
 npm install
 npm run dev
+```
+
+Endpoints locais:
+
+- API: `http://localhost:3000`
+- OpenAPI: `http://localhost:3000/docs`
+- Health: `http://localhost:3000/health`
+
+Copie `.env.example` para `.env` e configure o banco ou deixe
+`DATABASE_URL` vazio para usar o armazenamento em memória. O modo em memória não
+é persistente e não deve ser usado na publicação.
+
+## Testes
+
+```bash
 npm test
 ```
 
-O servidor local usa `PORT` (padrão 3000). Sem configuração de conexão ele usa o
-store em memória para desenvolvimento/testes. Para PostgreSQL:
+Os testes cobrem autenticação, administração, setores, pesquisas, dashboard,
+TV Wall e compatibilidade de contratos.
 
-1. Copie `.env.example` para `.env` local e preencha valores de desenvolvimento.
-2. Configure **ou** `DATABASE_URL` **ou** todos os campos `DB_*`; não configure
-   os dois formatos ao mesmo tempo.
-3. Execute `npm run migrate` e, se necessário, `npm run seed`.
-4. Configure `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD` somente ao executar o
-   seed para criar/atualizar a conta administrativa inicial.
+## Banco de dados
 
-O `.env` é ignorado pelo Git. `.env.example` contém apenas placeholders e valores
-locais, nunca credenciais reais.
+```bash
+npm run migrate
+npm run seed
+```
 
-## Variáveis importantes
+O banco não é criado automaticamente no primeiro deploy. O responsável pelo
+deploy deve executar as migrações uma vez e após novas versões de banco.
 
-- `NODE_ENV=production` no serviço publicado.
-- `JWT_SECRET`: segredo aleatório forte, com pelo menos 32 caracteres.
-- `CORS_ORIGIN`: origem HTTPS exata do consumidor web, sem barra final.
-- `DATABASE_URL` ou variáveis `DB_*`; TLS ligado por padrão.
-- `TV_WALL_PRIVATE=true`: TV Wall exige JWT e perfil Super Admin/Admin de Setor.
-  Só definir `false` se o endpoint realmente puder ser público.
-- Render fornece `PORT`.
+`database/migrations/` contém as alterações versionadas aplicadas pela rotina
+`npm run migrate`. Para diagnóstico em produção, use o health check; ele informa
+se o banco está conectado.
 
-Para produção, mantenha `DB_SSL_REJECT_UNAUTHORIZED=true` sempre que possível.
-Consulte [segurança e nuvem](docs/seguranca-e-nuvem.md) antes de publicar.
+## Segurança
+
+- Nunca reutilize o `JWT_SECRET` de demonstração.
+- Configure CORS com a origem HTTPS exata do front-end.
+- Use HTTPS e mantenha TLS rejeitando certificados não autorizados.
+- Mantenha `TV_WALL_PRIVATE=true`, exceto quando a TV Wall tiver sido
+  deliberadamente publicada como recurso público.
+- Use credenciais fortes e controle de acesso por perfil.
+- Dados pessoais e manifestações devem seguir a política de privacidade aprovada
+  pelo hospital.
+
+## API
+
+A OpenAPI hospedada em `/docs` contém os parâmetros e respostas dos endpoints.
+Principais grupos:
+
+- `/api/auth/*`: login e autenticação.
+- `/api/setores/*` e `/api/pesquisas/*`: pesquisa pública.
+- `/api/manifestacoes/*`: Ouvidoria.
+- `/api/dashboard/*`: indicadores e consultas.
+- `/api/admin/*`: setores e perguntas.
+- `/api/tvwall`: indicadores agregados.
+- `/api/reports/*`: relatórios e exportação.
+
+Rotas protegidas usam `Authorization: Bearer <JWT>`. Respostas de pesquisa
+particularmente protegidas usam `x-survey-token`.
+
+## Front-end integrado
+
+O front-end publicado deve enviar requisições para:
+
+```text
+VITE_API_URL=https://projfund-hosposwaldodiesel-back.onrender.com
+```
+
+Caso a URL do front-end mude no Render, atualize o `CORS_ORIGIN` do back-end e faça
+um novo deploy do serviço. CORS diferencia HTTPS, domínio e barra final.
+
+## Publicação
+
+Após alterar o código:
+
+1. Execute `npm test`.
+2. Envie o commit para a branch configurada no Render.
+3. Confirme o build e o health check.
+4. Execute migrações pendentes pelo Shell, se houver.
+5. Valide `/docs`, login, pesquisa, dashboard e TV Wall no ambiente publicado.
 
 ## Documentação do projeto
 
-- [Requisitos e matriz de rastreabilidade](docs/requisitos.md)
-- [Arquitetura do back-end](docs/arquitetura-backend.md)
-- [Padrões de Git e PR](docs/padroes-git.md)
-- [Plano e relatório de testes](docs/plano-e-relatorio-de-testes.md)
-- [Modelo de dados e justificativa SQL](docs/modelo-de-dados-e-requisitos.md)
-- [Padrões de banco de dados](docs/padroes-banco-de-dados.md)
-- [Mapeamento de módulos e consultas](docs/mapeamento-classes-e-consultas.md)
+- [Requisitos](docs/requisitos.md)
+- [Arquitetura](docs/arquitetura-backend.md)
+- [Modelo de dados](docs/modelo-de-dados-e-requisitos.md)
+- [Padrões de banco](docs/padroes-banco-de-dados.md)
 - [Segurança e nuvem](docs/seguranca-e-nuvem.md)
-- [Kanban local e pendências do quadro externo](docs/kanban.md)
-- [Plano de negócios e pitch (hipóteses)](docs/plano-de-negocios-e-pitch.md)
-- [Roteiro de aceite e apresentação](docs/aceite-e-apresentacao.md)
-
-**Kanban Trello/GitHub Projects:** link externo pendente de criação/compartilhamento.
-Até lá, o acompanhamento está no [quadro Markdown](docs/kanban.md).
-
-## API e OpenAPI
-
-- OpenAPI JSON local: [http://localhost:3000/docs](http://localhost:3000/docs)
-- Health check: [http://localhost:3000/health](http://localhost:3000/health)
-- URL pública da API e link publicado do OpenAPI: pendentes de confirmação do
-  domínio do serviço Render. `/docs` serve JSON OpenAPI; não há Swagger UI
-  interativa embutida.
-
-A maioria das rotas responde JSON; `/api/reports/excel` baixa uma planilha.
-Respostas, dados de paciente e manifestações de pesquisa exigem
-`x-survey-token`; rotas administrativas exigem `Authorization: Bearer <JWT>`.
-Consulte `/docs` para parâmetros e respostas completos.
-
-## Banco e deploy
-
-`npm run migrate` aplica os arquivos ordenados de `database/migrations/`;
-`database/schema.sql` descreve o esquema e `database/seed.sql` carrega dados de
-referência. O README documenta Render + Supabase, mas a URL pública, o estado do
-deploy, backups e restrições de rede precisam ser confirmados no painel cloud.
+- [Plano e relatório de testes](docs/plano-e-relatorio-de-testes.md)
+- [Roteiro de aceite](docs/aceite-e-apresentacao.md)
