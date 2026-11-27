@@ -1,58 +1,59 @@
-# Plano de negócios e pitch 
+# Plano de Negócios e Pitch — SGEP
 
-## Produto e proposta de valor
+**Instituição-alvo:** Fundação Hospitalar Doutor Oswaldo Diesel
 
-O SGEP é uma API para registrar experiência do paciente, organizar perguntas
-por setor, receber manifestações e gerar indicadores para gestão hospitalar.
-O valor potencial é consolidar feedback em um fluxo auditável e oferecer
-indicadores agregados sem expor grupos pequenos.
+## 1. Produto e Proposta de Valor
 
-Esta proposta é um modelo de estudo baseado nas capacidades do back-end. Não é
-pesquisa de mercado, orçamento, promessa de lucro ou validação com cliente.
+O **SGEP** é uma API voltada à gestão da experiência do paciente para a **Fundação Hospitalar Doutor Oswaldo Diesel**, estruturada para:
 
-## Segmento e alternativas comerciais
+* **Organizar avaliações por setor hospitalar:** Coleta segmentada (pronto-atendimento, internação, recepção, ambulatório) para identificar gargalos assistenciais com precisão.
+* **Consolidar manifestações em fluxo auditável:** Registro rastreável de elogios, sugestões e reclamações, apoiando a ouvidoria e a gestão da qualidade.
+* **Proteger a privacidade e a LGPD:** Geração de indicadores agregados sem expor grupos pequenos, evitando a reidentificação de pacientes ou equipes em setores com baixo volume de respostas.
 
-- Clientes potenciais: hospitais, clínicas e redes com vários setores.
-- SaaS: mensalidade por unidade/porte, suporte e operação hospedada.
-- Licenciamento: implantação em infraestrutura do cliente, licença anual e
-  serviços de suporte/atualização.
-- Receita adicional possível: implantação, treinamento, integrações e suporte
-  premium; precificação depende de entrevistas e análise de concorrência.
+> *Nota de escopo: Esta proposta é um modelo de estudo baseado nas capacidades técnicas do back-end. Não constitui pesquisa de mercado, orçamento auditado, promessa de lucro ou validação comercial definitiva.*
 
-## Simulação financeira ilustrativa
+---
 
-Hipóteses didáticas editáveis — não são cotações:
+## 2. Modelo Comercial e Alternativas
 
-- preço médio: **R$ 1.500 por instituição/mês**;
-- custo variável: **R$ 300 por instituição/mês**;
-- custos fixos operacionais: **R$ 12.000/mês**;
-- resultado antes de impostos, investimento inicial e despesas financeiras.
+Como o projeto é direcionado especificamente à **Fundação Hospitalar Doutor Oswaldo Diesel**, a operação dedicada substitui a escala multi-hospitalar genérica:
 
-Margem de contribuição por instituição = R$ 1.500 − R$ 300 = R$ 1.200.
-Ponto de equilíbrio operacional = `ceil(12.000 / 1.200)` = **10 instituições**.
+* **SaaS Dedicado (Operação Hospedada):** Mensalidade fixa de **R$ 300/mês**, cobrindo hospedagem, manutenção contínua e disponibilidade da API para todos os setores da instituição.
+* **Licenciamento On-Premise (Alternativa):** Implantação na infraestrutura interna da própria Fundação, caso a política institucional de TI exija retenção local dos dados, com licença anual e suporte técnico.
+* **Serviços Adicionais (Escopo Sob Demanda):** Setup inicial, treinamento das equipes de ouvidoria/qualidade e integrações com sistemas hospitalares existentes (prontuário eletrônico ou ERP) precificados à parte conforme horas técnicas estimadas.
 
-| Instituições ativas | Receita recorrente mensal | Custos variáveis | Custos fixos | Resultado operacional hipotético |
-|---:|---:|---:|---:|---:|
-| 6 | R$ 9.000 | R$ 1.800 | R$ 12.000 | −R$ 4.800 |
-| 10 | R$ 15.000 | R$ 3.000 | R$ 12.000 | R$ 0 |
-| 15 | R$ 22.500 | R$ 4.500 | R$ 12.000 | R$ 6.000 |
-| 24 | R$ 36.000 | R$ 7.200 | R$ 12.000 | R$ 16.800 |
+---
 
-O cenário sugere que o lucro operacional pode surgir após o ponto de equilíbrio,
-mas não considera tributos, inadimplência, aquisição de clientes, implantação,
-desenvolvimento, compliance, suporte 24x7 ou despesas de capital. Substituir
-todos os valores por cotações e entrevistas antes de usar em decisão comercial.
+## 3. Simulação Financeira Específica (1 Instituição)
 
-## Riscos e validações necessárias
+Hipóteses didáticas editáveis para a operação exclusiva da Fundação:
 
-- Validar disposição de pagamento, ciclo de compra hospitalar e requisitos de
-  LGPD/contratos.
-- Orçar suporte, monitoramento, backups, segurança e certificações aplicáveis.
-- Para SaaS multi-instituição, completar isolamento por `hospital_id` em todas as
-  consultas, permissões e relatórios. O modelo atual tem hospital como entidade,
-  mas não comprova isolamento multi-tenant completo.
-- Definir plano de continuidade, portabilidade/exportação e processo de
-  encerramento contratual.
+* **Preço médio (Receita recorrente mensal):** R$ 300,00 / mês
+* **Custo variável mensal:** R$ 20,00 / mês
+* **Custos fixos operacionais mensais:** R$ 80,00 / mês
+* **Margem de contribuição:** $\text{R\$ } 300{,}00 - \text{R\$ } 20{,}00 = \text{R\$ } 280{,}00$ (**93,3%** sobre a receita)
+* **Ponto de equilíbrio operacional:** $\lceil 80 / 280 \rceil = \lceil 0{,}29 \rceil =$ **1 instituição**
+
+### Demonstrativo Projetado — Fundação Hospitalar Doutor Oswaldo Diesel
+
+| Indicador Financeiro | Visão Mensal (1 Instituição) | Visão Anual (12 Meses) | Participação na Receita |
+|---|---:|---:|---:|
+| **Receita Recorrente Bruta** | R$ 300,00 | R$ 3.600,00 | 100,0% |
+| **(-) Custos Variáveis** | R$ 20,00 | R$ 240,00 | 6,7% |
+| **(=) Margem de Contribuição** | **R$ 280,00** | **R$ 3.360,00** | **93,3%** |
+| **(-) Custos Fixos Operacionais** | R$ 80,00 | R$ 960,00 | 26,7% |
+| **(=) Resultado Operacional** | **R$ 200,00** | **R$ 2.400,00** | **66,7%** |
+
+> *Ressalva financeira: O cenário aponta resultado operacional positivo já na 1ª instituição ativa, mas não considera tributos, inadimplência, horas de implantação inicial, desenvolvimento evolutivo, suporte 24x7 ou despesas de capital.*
+
+---
+
+## 4. Riscos e Validações Necessárias
+
+* **Adequação à LGPD e Contratos:** Validar requisitos jurídicos da Fundação, definindo papéis de Controlador e Operador de dados e regras para tratamento de manifestações sensíveis.
+* **Nível de Serviço (SLA) e Suporte:** Compatibilizar a janela de atendimento (ex.: horário comercial), rotina de backups, monitoramento e segurança com a estrutura enxuta de custos fixos (R$ 80,00/mês).
+* **Isolamento Arquitetural (`hospital_id`):** Manter o filtro rigoroso por identificador institucional nas consultas, permissões e relatórios, preservando a integridade dos dados caso novos módulos ou unidades sejam incorporados no futuro.
+* **Continuidade e Portabilidade:** Definir plano de continuidade de negócios, formato de exportação integral da base (CSV/JSON) e fluxo de encerramento contratual.
 
 ## Pitch sugerido (5–7 minutos)
 
