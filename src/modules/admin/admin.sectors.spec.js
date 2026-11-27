@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe('admin sector management', () => {
-  it('updates sector activity and keeps inactive sectors in the admin list', async () => {
+  it('deactivates sectors through DELETE while preserving them for administrators', async () => {
     const login = await request(app)
       .post('/api/auth/login')
       .send({ email: 'super@fundacao.com', senha: 'super123' });
@@ -19,9 +19,8 @@ describe('admin sector management', () => {
     const authorization = `Bearer ${login.body.token}`;
 
     const deactivate = await request(app)
-      .patch(`/api/admin/setores/${sector.id}`)
+      .delete(`/api/admin/setores/${sector.id}`)
       .set('Authorization', authorization)
-      .send({ ativo: false });
 
     expect(deactivate.status).toBe(200);
     expect(deactivate.body.ativo).toBe(false);
@@ -34,5 +33,13 @@ describe('admin sector management', () => {
     expect(adminSectors.status).toBe(200);
     expect(adminSectors.body.find((item) => item.id === sector.id).ativo).toBe(false);
     expect(publicSectors.body.some((item) => item.id === sector.id)).toBe(false);
+
+    const reactivate = await request(app)
+      .patch(`/api/admin/setores/${sector.id}`)
+      .set('Authorization', authorization)
+      .send({ ativo: true });
+
+    expect(reactivate.status).toBe(200);
+    expect(reactivate.body.ativo).toBe(true);
   });
 });
