@@ -525,7 +525,7 @@ router.post('/pesquisas/:id/paciente', requireSurveyToken(), asyncHandler(async 
 router.post('/pesquisas/:id/manifestacoes', requireSurveyToken(true), asyncHandler(async (req, res) => {
   const schema = z.object({
     tipo: z.enum(['elogio', 'reclamacao', 'sugestao']),
-    descricao: z.string().min(5),
+    descricao: z.string().trim().optional().default(''),
     anonimo: z.boolean().optional().default(false),
     canal_contato: z.string().optional(),
     consentimento: z.boolean().optional().default(false),

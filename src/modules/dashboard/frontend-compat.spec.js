@@ -63,6 +63,17 @@ describe('frontend integration contracts', () => {
     ]));
   });
 
+  it('accepts a manifestation without a description', async () => {
+    const survey = await request(app).post('/api/pesquisas').send({ setor_id: 1 });
+    const response = await request(app)
+      .post(`/api/pesquisas/${survey.body.pesquisa_id}/manifestacoes`)
+      .set('x-survey-token', survey.body.token)
+      .send({ tipo: 'reclamacao', anonimo: true, descricao: '' });
+
+    expect(response.status).toBe(201);
+    expect(response.body.descricao).toBe('');
+  });
+
   it('limits management dashboard rows to the user sector', async () => {
     const first = await request(app).post('/api/pesquisas').send({ setor_id: 1 });
     const second = await request(app).post('/api/pesquisas').send({ setor_id: 2 });
