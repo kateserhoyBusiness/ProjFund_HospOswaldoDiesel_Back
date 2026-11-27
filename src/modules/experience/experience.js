@@ -260,9 +260,14 @@ router.post('/pesquisas', asyncHandler(async (req, res) => {
        ) AS turno_atual
        LEFT JOIN LATERAL (
          SELECT id FROM care_team
-         WHERE setor_id = $1 AND data = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
-           AND turno = turno_atual.valor
-         ORDER BY id DESC LIMIT 1
+         WHERE setor_id = $1
+           AND (
+             (permanente = FALSE
+               AND data = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
+               AND turno = turno_atual.valor)
+             OR permanente = TRUE
+           )
+         ORDER BY permanente DESC, id DESC LIMIT 1
        ) AS equipe ON TRUE
        RETURNING id, token`,
       [setorDb.id, payload.data.anonimo, payload.data.consentimento, token],
@@ -275,14 +280,18 @@ router.post('/pesquisas', asyncHandler(async (req, res) => {
     return res.status(404).json({ erro: 'Setor não encontrado', codigo: 'SETOR_NOT_FOUND' });
   }
 
+  const currentDate = saoPauloDate();
+  const shift = currentShift();
+  const team = appStore.equipes.find((item) => item.setor_id === setor.id && item.permanente)
+    ?? appStore.equipes.find((item) =>
+      item.setor_id === setor.id && item.data === currentDate && item.turno === shift);
   const pesquisa = {
     id: appStore.pesquisas.length + 1,
     setor_id: setor.id,
     paciente_id: null,
     data_hora: new Date().toISOString(),
-    turno: currentShift(),
-    equipe_id: appStore.equipes.find((team) => team.setor_id === setor.id
-      && team.data === saoPauloDate() && team.turno === currentShift())?.id ?? null,
+    turno: shift,
+    equipe_id: team?.id ?? null,
     anonimo: payload.data.anonimo,
     consentimento: payload.data.consentimento,
     media_parcial: null,

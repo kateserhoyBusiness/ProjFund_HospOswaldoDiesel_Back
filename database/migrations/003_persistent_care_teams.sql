@@ -1,0 +1,9 @@
+ALTER TABLE care_team
+  ADD COLUMN IF NOT EXISTS permanente BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE care_team ALTER COLUMN data DROP NOT NULL;
+ALTER TABLE care_team ALTER COLUMN turno DROP NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_permanent_team_sector
+  ON care_team(setor_id)
+  WHERE permanente = TRUE;

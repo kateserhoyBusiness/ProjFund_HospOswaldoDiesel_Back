@@ -103,6 +103,45 @@ describe('patient experience API', () => {
     ]));
   });
 
+  it('links new surveys to a permanent sector team and reveals its name only at five responses', async () => {
+    const token = await loginAsSuperAdmin();
+    const team = await request(app)
+      .post('/api/admin/equipes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ setor_id: 2, nome: 'Equipe fixa da triagem', permanente: true });
+
+    expect(team.status).toBe(201);
+    expect(team.body.permanente).toBe(true);
+    createdTeams.push(team.body.id);
+
+    const surveyIds = [];
+    for (let index = 0; index < 4; index += 1) {
+      const survey = await request(app).post('/api/pesquisas').send({ setor_id: 2 });
+      expect(survey.status).toBe(201);
+      surveyIds.push(survey.body.pesquisa_id);
+      createdSurveys.push(survey.body.pesquisa_id);
+    }
+
+    const beforeThreshold = await request(app)
+      .get('/api/dashboard/pesquisas?setor_id=2')
+      .set('Authorization', `Bearer ${token}`);
+    const hiddenSurveys = beforeThreshold.body.filter((survey) => surveyIds.includes(survey.id));
+    expect(hiddenSurveys).toHaveLength(4);
+    expect(hiddenSurveys.every((survey) => survey.equipe_vinculada && survey.equipe === null)).toBe(true);
+
+    const fifthSurvey = await request(app).post('/api/pesquisas').send({ setor_id: 2 });
+    expect(fifthSurvey.status).toBe(201);
+    surveyIds.push(fifthSurvey.body.pesquisa_id);
+    createdSurveys.push(fifthSurvey.body.pesquisa_id);
+
+    const afterThreshold = await request(app)
+      .get('/api/dashboard/pesquisas?setor_id=2')
+      .set('Authorization', `Bearer ${token}`);
+    const visibleSurveys = afterThreshold.body.filter((survey) => surveyIds.includes(survey.id));
+    expect(visibleSurveys).toHaveLength(5);
+    expect(visibleSurveys.every((survey) => survey.equipe === 'Equipe fixa da triagem')).toBe(true);
+  });
+
   it('serves privacy information and suppresses small public TV Wall samples', async () => {
     const privacy = await request(app).get('/api/privacidade');
     let tvwall;

@@ -36,8 +36,17 @@ const questionSchema = z.object({
 const teamSchema = z.object({
   setor_id: z.number().int().positive(),
   nome: z.string().trim().min(2).max(150),
-  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  turno: z.enum(['manha', 'tarde', 'noite']),
+  data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  turno: z.enum(['manha', 'tarde', 'noite']).nullable().optional(),
+  permanente: z.boolean().optional().default(false),
+}).superRefine((team, context) => {
+  if (!team.permanente && (!team.data || !team.turno)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['data'],
+      message: 'Informe a data e o turno para uma equipe temporária.',
+    });
+  }
 });
 
 const assignablePermissions = new Set(['admin_setor', 'gestao', 'ouvidoria', 'visualizador']);
@@ -447,14 +456,34 @@ router.post('/admin/equipes', requireAuth, requireQuestionManager, asyncHandler(
   if (!canManageSector(req.user, payload.data.setor_id)) {
     throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
   }
+  if (payload.data.permanente) {
+    const existing = databaseConfigured
+      ? (await query('SELECT id FROM care_team WHERE setor_id = $1 AND permanente = TRUE', [payload.data.setor_id])).rows
+      : (appStore.equipes ?? []).filter((team) => team.setor_id === payload.data.setor_id && team.permanente);
+    if (existing.length) {
+      throw new AppError('Já existe uma equipe fixa para este setor.', 409, 'PERMANENT_TEAM_EXISTS');
+    }
+  }
   if (databaseConfigured) {
     const result = await query(
-      `INSERT INTO care_team (setor_id, nome, data, turno) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [payload.data.setor_id, payload.data.nome, payload.data.data, payload.data.turno],
+      `INSERT INTO care_team (setor_id, nome, data, turno, permanente)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [
+        payload.data.setor_id,
+        payload.data.nome,
+        payload.data.permanente ? null : payload.data.data,
+        payload.data.permanente ? null : payload.data.turno,
+        payload.data.permanente,
+      ],
     );
     return res.status(201).json(result.rows[0]);
   }
-  const team = { id: (appStore.equipes?.length ?? 0) + 1, ...payload.data };
+  const team = {
+    id: (appStore.equipes?.length ?? 0) + 1,
+    ...payload.data,
+    data: payload.data.permanente ? null : payload.data.data,
+    turno: payload.data.permanente ? null : payload.data.turno,
+  };
   appStore.equipes ??= [];
   appStore.equipes.push(team);
   return res.status(201).json(team);

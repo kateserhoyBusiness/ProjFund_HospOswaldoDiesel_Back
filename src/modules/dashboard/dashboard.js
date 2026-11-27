@@ -121,6 +121,7 @@ router.get('/dashboard/pesquisas', requireAuth, requireDashboardAccess, asyncHan
   if (databaseConfigured) {
     const result = await query(
       `SELECT p.id, s.slug AS setor_slug, p.data_hora, p.turno,
+              (e.id IS NOT NULL) AS equipe_vinculada,
               CASE WHEN e.id IS NOT NULL AND COUNT(p.id) OVER (PARTITION BY e.id) >= ${MINIMUM_PRIVACY_RESPONSES}
                    THEN e.nome ELSE NULL END AS equipe,
               p.media_parcial, p.nps_nota, p.status
@@ -147,6 +148,7 @@ router.get('/dashboard/pesquisas', requireAuth, requireDashboardAccess, asyncHan
       setor_slug: appStore.setores.find((item) => item.id === survey.setor_id)?.slug,
       data_hora: survey.data_hora,
       turno: survey.turno,
+      equipe_vinculada: survey.equipe_id !== null,
       equipe: team && (teamCounts.get(team.id) ?? 0) >= MINIMUM_PRIVACY_RESPONSES ? team.nome : null,
       media_parcial: survey.media_parcial,
       nps_nota: survey.nps_nota,

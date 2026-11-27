@@ -430,6 +430,41 @@ export const openApiDocument = {
         },
       },
     },
+    '/admin/equipes': {
+      get: {
+        summary: 'Lista equipes cadastradas nos setores autorizados',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': { description: 'Lista de equipes' },
+        },
+      },
+      post: {
+        summary: 'Cadastra uma equipe fixa por setor ou uma escala temporária',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['setor_id', 'nome'],
+                properties: {
+                  setor_id: { type: 'integer' },
+                  nome: { type: 'string' },
+                  permanente: { type: 'boolean', default: false },
+                  data: { type: 'string', format: 'date', nullable: true },
+                  turno: { type: 'string', enum: ['manha', 'tarde', 'noite'], nullable: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Equipe cadastrada' },
+          '409': { description: 'Já existe equipe fixa para o setor' },
+        },
+      },
+    },
     '/admin/perfis': {
       get: {
         summary: 'Lista perfis atribuíveis a contas (sem o perfil administrador)',
