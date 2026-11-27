@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS care_team (
   setor_id INTEGER NOT NULL REFERENCES sector(id) ON DELETE CASCADE,
   nome VARCHAR(150) NOT NULL,
   turno VARCHAR(10) NOT NULL CHECK (turno IN ('manha', 'tarde', 'noite')),
-  data DATE NOT NULL
+  data DATE NOT NULL,
+  ativo BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS staff_member (

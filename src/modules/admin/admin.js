@@ -458,8 +458,8 @@ router.post('/admin/equipes', requireAuth, requireQuestionManager, asyncHandler(
   }
   if (payload.data.permanente) {
     const existing = databaseConfigured
-      ? (await query('SELECT id FROM care_team WHERE setor_id = $1 AND permanente = TRUE', [payload.data.setor_id])).rows
-      : (appStore.equipes ?? []).filter((team) => team.setor_id === payload.data.setor_id && team.permanente);
+      ? (await query('SELECT id FROM care_team WHERE setor_id = $1 AND permanente = TRUE AND ativo = TRUE', [payload.data.setor_id])).rows
+      : (appStore.equipes ?? []).filter((team) => team.setor_id === payload.data.setor_id && team.permanente && team.ativo !== false);
     if (existing.length) {
       throw new AppError('Já existe uma equipe fixa para este setor.', 409, 'PERMANENT_TEAM_EXISTS');
     }
@@ -483,10 +483,32 @@ router.post('/admin/equipes', requireAuth, requireQuestionManager, asyncHandler(
     ...payload.data,
     data: payload.data.permanente ? null : payload.data.data,
     turno: payload.data.permanente ? null : payload.data.turno,
+    ativo: true,
   };
   appStore.equipes ??= [];
   appStore.equipes.push(team);
   return res.status(201).json(team);
+}));
+
+router.delete('/admin/equipes/:id', requireAuth, requireQuestionManager, asyncHandler(async (req, res) => {
+  const teamId = Number(req.params.id);
+  if (!Number.isInteger(teamId) || teamId <= 0) throw new AppError('Equipe inválida', 400, 'INVALID_TEAM');
+
+  const team = databaseConfigured
+    ? (await query('SELECT id, setor_id FROM care_team WHERE id = $1 AND permanente = TRUE', [teamId])).rows[0]
+    : (appStore.equipes ?? []).find((item) => item.id === teamId && item.permanente);
+  if (!team) throw new AppError('Equipe fixa não encontrada', 404, 'TEAM_NOT_FOUND');
+  if (!canManageSector(req.user, team.setor_id)) {
+    throw new AppError('Setor fora do seu perfil de acesso', 403, 'FORBIDDEN');
+  }
+
+  if (databaseConfigured) {
+    const result = await query('UPDATE care_team SET ativo = FALSE WHERE id = $1 RETURNING *', [teamId]);
+    return res.json(result.rows[0]);
+  }
+
+  team.ativo = false;
+  return res.json(team);
 }));
 
 router.get('/admin/perfis', requireAuth, requirePermission('super_admin'), asyncHandler(async (_req, res) => {

@@ -261,6 +261,7 @@ router.post('/pesquisas', asyncHandler(async (req, res) => {
        LEFT JOIN LATERAL (
          SELECT id FROM care_team
          WHERE setor_id = $1
+           AND ativo = TRUE
            AND (
              (permanente = FALSE
                AND data = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
@@ -282,9 +283,9 @@ router.post('/pesquisas', asyncHandler(async (req, res) => {
 
   const currentDate = saoPauloDate();
   const shift = currentShift();
-  const team = appStore.equipes.find((item) => item.setor_id === setor.id && item.permanente)
+  const team = appStore.equipes.find((item) => item.setor_id === setor.id && item.permanente && item.ativo !== false)
     ?? appStore.equipes.find((item) =>
-      item.setor_id === setor.id && item.data === currentDate && item.turno === shift);
+      item.setor_id === setor.id && item.data === currentDate && item.turno === shift && item.ativo !== false);
   const pesquisa = {
     id: appStore.pesquisas.length + 1,
     setor_id: setor.id,

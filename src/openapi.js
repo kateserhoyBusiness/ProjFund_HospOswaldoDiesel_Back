@@ -465,6 +465,18 @@ export const openApiDocument = {
         },
       },
     },
+    '/admin/equipes/{id}': {
+      delete: {
+        summary: 'Arquiva uma equipe fixa e preserva as pesquisas históricas',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'integer' } }],
+        responses: {
+          '200': { description: 'Equipe arquivada' },
+          '403': { description: 'Setor fora do perfil de acesso' },
+          '404': { description: 'Equipe fixa não encontrada' },
+        },
+      },
+    },
     '/admin/perfis': {
       get: {
         summary: 'Lista perfis atribuíveis a contas (sem o perfil administrador)',

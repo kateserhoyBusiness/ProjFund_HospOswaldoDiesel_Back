@@ -142,6 +142,45 @@ describe('patient experience API', () => {
     expect(visibleSurveys.every((survey) => survey.equipe === 'Equipe fixa da triagem')).toBe(true);
   });
 
+  it('archives a permanent team without changing old survey links and allows a replacement', async () => {
+    const token = await loginAsSuperAdmin();
+    const oldTeam = await request(app)
+      .post('/api/admin/equipes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ setor_id: 3, nome: 'Equipe antiga', permanente: true });
+    expect(oldTeam.status).toBe(201);
+    createdTeams.push(oldTeam.body.id);
+
+    const oldSurvey = await request(app).post('/api/pesquisas').send({ setor_id: 3 });
+    expect(oldSurvey.status).toBe(201);
+    createdSurveys.push(oldSurvey.body.pesquisa_id);
+    expect(appStore.pesquisas.find((survey) => survey.id === oldSurvey.body.pesquisa_id).equipe_id).toBe(oldTeam.body.id);
+
+    const archived = await request(app)
+      .delete(`/api/admin/equipes/${oldTeam.body.id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(archived.status).toBe(200);
+    expect(archived.body.ativo).toBe(false);
+    expect(appStore.pesquisas.find((survey) => survey.id === oldSurvey.body.pesquisa_id).equipe_id).toBe(oldTeam.body.id);
+
+    const unassignedSurvey = await request(app).post('/api/pesquisas').send({ setor_id: 3 });
+    expect(unassignedSurvey.status).toBe(201);
+    createdSurveys.push(unassignedSurvey.body.pesquisa_id);
+    expect(appStore.pesquisas.find((survey) => survey.id === unassignedSurvey.body.pesquisa_id).equipe_id).toBeNull();
+
+    const newTeam = await request(app)
+      .post('/api/admin/equipes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ setor_id: 3, nome: 'Equipe nova', permanente: true });
+    expect(newTeam.status).toBe(201);
+    createdTeams.push(newTeam.body.id);
+
+    const newSurvey = await request(app).post('/api/pesquisas').send({ setor_id: 3 });
+    expect(newSurvey.status).toBe(201);
+    createdSurveys.push(newSurvey.body.pesquisa_id);
+    expect(appStore.pesquisas.find((survey) => survey.id === newSurvey.body.pesquisa_id).equipe_id).toBe(newTeam.body.id);
+  });
+
   it('serves privacy information and suppresses small public TV Wall samples', async () => {
     const privacy = await request(app).get('/api/privacidade');
     let tvwall;

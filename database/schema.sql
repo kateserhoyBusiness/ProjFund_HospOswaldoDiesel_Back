@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS care_team (
   nome VARCHAR(150) NOT NULL,
   turno VARCHAR(10) CHECK (turno IN ('manha', 'tarde', 'noite')),
   data DATE,
-  permanente BOOLEAN NOT NULL DEFAULT FALSE
+  permanente BOOLEAN NOT NULL DEFAULT FALSE,
+  ativo BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS staff_member (
@@ -133,7 +134,7 @@ CREATE TABLE IF NOT EXISTS staff_shift (
 
 ALTER TABLE survey ADD COLUMN IF NOT EXISTS equipe_id INTEGER REFERENCES care_team(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_team_sector_date_shift ON care_team(setor_id, data, turno);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_permanent_team_sector ON care_team(setor_id) WHERE permanente = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_permanent_team_sector ON care_team(setor_id) WHERE permanente = TRUE AND ativo = TRUE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_shift_assignment ON staff_shift(equipe_id, profissional_id, data, turno);
 CREATE INDEX IF NOT EXISTS idx_survey_team ON survey(equipe_id);
 
